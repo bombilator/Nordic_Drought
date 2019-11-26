@@ -1,0 +1,39 @@
+<PAMDataset>
+  <PAMRasterBand band="1">
+    <CategoryNames>
+      <Category></Category>
+      <Category></Category>
+      <Category></Category>
+      <Category></Category>
+      <Category></Category>
+      <Category></Category>
+      <Category></Category>
+      <Category></Category>
+      <Category></Category>
+      <Category></Category>
+      <Category>Cfb</Category>
+      <Category>Cfc</Category>
+      <Category></Category>
+      <Category></Category>
+      <Category></Category>
+      <Category></Category>
+      <Category></Category>
+      <Category></Category>
+      <Category></Category>
+      <Category>Dfb</Category>
+      <Category>Dfc</Category>
+      <Category></Category>
+      <Category></Category>
+      <Category></Category>
+      <Category></Category>
+      <Category></Category>
+      <Category></Category>
+      <Category></Category>
+      <Category></Category>
+      <Category></Category>
+      <Category></Category>
+      <Category>ET</Category>
+      <Category>Ocean</Category>
+    </CategoryNames>
+  </PAMRasterBand>
+</PAMDataset>
