@@ -169,18 +169,36 @@ tibm.pet8 <- readRDS("output/process/fennos_tibm_pet8.rds") %>% filter(id %in% g
 tibm.pet1 <- readRDS("output/process/fennos_tibm_pet1.rds") %>% filter(id %in% g$id)
 
 
-g.df <- readRDS("output/process/sgi_durs.rds") %>% ungroup() %>% select(-id) %>% #readRDS("output/3.sgi.rds") %>% 
-  dplyr::rename(id=Cluster) %>% filter(id!="34") %>%
-  group_by(id, Station) %>% mutate(date = as.Date(paste(format(date, "%Y-%m"), "-15", sep=""))) %>% 
-  as.data.frame()
-spi.ind <- readRDS("output/process/3clusters_spi.rds") %>% select(-month_past) %>% ungroup() %>% 
-  as.data.frame() %>% group_by(id, agg)
-smri.ind <- readRDS("output/process/3clusters_smri.rds") %>% select(-month_past) %>% ungroup() %>% 
-  as.data.frame() %>% group_by(id, agg)
-spei.ind <- readRDS("output/process/3clusters_spei.rds") %>% ungroup() %>% 
-  as.data.frame() %>% group_by(id, agg)
-smrei.ind <- readRDS("output/process/3cluster_smrei.rds") %>% ungroup() %>% 
-  as.data.frame() %>% group_by(id, agg)
+# g.df <- readRDS("output/process/sgi_durs.rds") %>% ungroup() %>% #readRDS("output/3.sgi.rds") %>% 
+#   group_by(id) %>% mutate(date = as.Date(paste(format(date, "%Y-%m"), "-15", sep=""))) %>% 
+#   as.data.frame()
+# # for RT90 coordinates (download from luftweb manually)
+# cors <- g.df %>% distinct(id, Station, N, E)
+# coordinates(cors) = ~N+E
+# proj4string(cors) = CRS("+proj=longlat + datum=WGS84")
+# cors = spTransform(cors, CRS("+init=epsg:3021")) #RT90
+# cors = as.data.frame(cors)
+
+stand <- readRDS("output/process/clusters_spi_sgi1911.rds") %>% select(-data) %>% unnest() %>% 
+  mutate(type="spi") %>% 
+  full_join(., readRDS("output/process/clusters_spei_sgi1911.rds") %>% select(-data) %>% unnest() %>% 
+              mutate(type="spei")) %>% 
+  full_join(., readRDS("output/process/clusters_smri_sgi1911.rds") %>% select(-data) %>% unnest() %>% 
+              mutate(type="smri")) %>% 
+  full_join(., readRDS("output/process/clusters_smrei_sgi1911.rds") %>% select(-data) %>% unnest() %>% 
+              mutate(type="smrei")) %>% mutate(agg=as.numeric(agg)) %>% 
+  arrange(Cluster, Station, agg, date) %>% 
+  left_join(., readRDS("output/process/clusters_cmax_amax_all.rds") %>% rename(typemax=type))
+ 
+a # from calculate sgi.r line 57
+stand
+a <- a %>% mutate(id=paste(Cluster, Station, sep="_")) %>% 
+               filter(id %in% stand$id) %>% group_by(id) %>% 
+  mutate(median_mohm = median(level_m, na.rm=TRUE),
+         median_cm = median(level_cm, na.rm=TRUE)) %>% 
+           select(-date, -level_m, -level_cm, -UnderOkRor, -year, -month) %>% distinct()
+a <- a %>% select(-End, -RorHojdOMark, -E, -N)
+a <- left_join(a, stand %>% distinct(id, N, E))
 
 # tibm <- readRDS("output/process/tibm.r")
 # tibm <- tibm %>% ungroup() %>%
@@ -203,7 +221,7 @@ tibm <- readRDS("output/process/fennos_tibm_all_2.R") %>% select(E, N, id, date,
 bbox = as.numeric(c(11,55,24,69)) # Sweden and Finland: c(11, 55, 32, 70))
 names(bbox) <- c('left','bottom','right','top')
 source("rfuncs/get_stamenmapPNG.R")
-stamen <- get_stamenmapPNG(bbox, zoom = 6, maptype = "terrain")
+stamen <- get_stamenmapPNG(bbox, zoom = 6, maptype = "toner-background")
 
 gstat <- g %>% distinct(Tunnus, Station, id, N, E, country)
 plots <- gstat %>% filter(country=="swe") %>% distinct(Tunnus, Station, id, N, E)
@@ -520,11 +538,10 @@ plot_grid(a,b,c, ncol = 1, align = "hv", axis = "rlb")
 require(smooth)
 require(Mcomp)
 
-station = 55
-Aper = 4
-g.df %>% group_by(id, Station) %>%
-  filter((Station==9 & id==55) | ( id==37 & Station==34) | (id==14 & Station==2)) %>%
-  ggplot(.) + #ggtitle(label = station) +
+
+stand %>% group_by(Cluster, Station) %>%# filter(Cluster==37) %>% 
+  filter(agg==1 & type=="spi" & period=="allrec") %>%
+  ggplot(.) +
     # GW: ----
     # geom_line(data = . %>% filter(!is.na(mean_dep)),
     #           aes(ymd, mean_dep,
@@ -537,166 +554,89 @@ g.df %>% group_by(id, Station) %>%
     #           alpha=.5) +
     # geom_line(aes(ymd, g_geom, colour = "water table"),
     #           colour= "black", size = 0.8, alpha=.6) +
-    # geom_smooth(aes(ymd, g_geom*1), level=0) +
-    
-    #standardised ----
+    # # geom_smooth(aes(ymd, g_geom*1), level=0) +
+    # geom_line(data=. %>% group_by(id) %>% mutate(mean=median(mean_mon, na.rm=TRUE)),
+    #       aes(date, mean_mon-mean, group = id, colour=id), alpha=.3) +
+  #   geom_vline(aes(xintercept=as.Date("2002-04-15"))) +  
+  # geom_vline(aes(xintercept=as.Date("2002-07-15"))) +  
+  # geom_vline(aes(xintercept=as.Date("2002-12-15"))) +  
+  # geom_vline(aes(xintercept=as.Date("2003-04-15"))) +  
+  # geom_vline(aes(xintercept=as.Date("2003-07-15"))) +  
+  # geom_vline(aes(xintercept=as.Date("2003-12-15"))) +  
+  # geom_vline(aes(xintercept=as.Date("2002-04-15"))) +  
+  # geom_vline(aes(xintercept=as.Date("2002-07-15"))) +  
+  # geom_vline(aes(xintercept=as.Date("2002-12-15"))) +  
 
-    # geom_line(data=spi.ind, aes(date, index, group=agg), colour="salmon", alpha=.4) +
-    geom_ribbon(data = spi.ind %>% filter(id!=55) %>%
-                mutate(type=ifelse(as.numeric(agg)<6, "short", "long")) %>%
-                  group_by(id, date, type) %>% 
-                  mutate(mini=min(index), maxi=max(index)),
-              aes(date, ymin=mini, ymax=maxi, colour=type), #group=agg),
-            alpha=.2) +
-  # geom_ribbon(data = spei.ind %>%
-  #               group_by(id, date) %>%
-  #               mutate(mini=min(index), maxi=max(index)),
-  #             aes(date, ymin=mini, ymax=maxi, group=id, colour="all spei"), #group=agg),
-  #             alpha=.2) +
-  # geom_ribbon(data = smri.ind %>%
-  #               group_by(id, date) %>%
-  #               mutate(mini=min(index), maxi=max(index)),
-  #             aes(date, ymin=mini, ymax=maxi, group=id, colour="all smri"), #group=agg),
-  #             alpha=.2) +
-  geom_ribbon(data = smrei.ind %>% filter(id==55) %>%
-                mutate(type=ifelse(as.numeric(agg)<6, "short", "long")) %>%
-                group_by(id, date, type) %>%
-                mutate(mini=min(index), maxi=max(index)),
-              aes(date, ymin=mini, ymax=maxi, colour=type), #group=agg),
-              alpha=.2) +
-
-  geom_line(aes(date, sgi, group=Station, colour="sgi"), size=1, alpha = .8) +
-  
-  # geom_ribbon(data=d.spi %>% group_by(id, date) %>% filter(index < 0.1) %>% 
-  #               mutate(mini=min(index), maxi=max(index)),
-  #             aes(date, ymin=mini, ymax=0, group=id, 
-  #                 colour="all spi"), alpha=.3) +
-  # geom_ribbon(data=d.spei %>% group_by(id, date) %>% filter(index < 0.1) %>% 
-  #               mutate(mini=min(index)),
-  #             aes(date, ymin=mini, ymax=0, group=id, 
-  # #                 colour="all spei"), alpha=.3) +
-    # geom_ribbon(data=. %>% group_by(id, dry_year) %>% filter(any(sgi <= -1.5) & dry_dur > 365) %>%
-    #             mutate(dry_dur=as.numeric(dry_dur)),
-    #           aes(x=dry_dat, ymin=sgi, ymax=0, group=dry_year), alpha=.2)+
-  # 55 ----
-# 
-#   # geom_line(data = smrei.ind %>% mutate(Station=1) %>% filter(id == station & agg==5),
-#   #     aes(date, index, colour="Cmax"), linetype=2, size=1) +
-#   # geom_line(data = spei.ind %>% mutate(Station=11) %>% filter(id == station & agg==6),
-#   #           aes(date, index, group=agg, colour="Cmax"), linetype=2, size=1) +
-#   # geom_line(data = smrei.ind %>% mutate(Station=12) %>% filter(id == station & agg==6),
-#   #           aes(date, index, group=agg, colour="Cmax"), linetype=2, size=1) +
-#   # geom_line(data = smri.ind %>% mutate(Station=13) %>% filter(id == station & agg==48),
-#   #           aes(date, index, colour="Cmax"), linetype=2, size=1) +
-#   # geom_line(data = smri.ind %>% mutate(Station=14) %>% filter(id == station & agg==7),
-#   #           aes(date, index, group=agg, colour="Cmax"), linetype=2, size=1) +
-#   # geom_line(data = smri.ind %>% mutate(Station=17) %>% filter(id == station & agg==11),
-#   #           aes(date, index, group=agg, colour="Cmax"), linetype=2, size=1) +
-#   # geom_line(data = smri.ind %>% mutate(Station=7) %>% filter(id == station & agg==5),
-#   #           aes(date, index, colour="Cmax"), linetype=2, size=1) +
-#   # geom_line(data = smrei.ind %>% mutate(Station=8) %>% filter(id == station & agg==12),
-#   #           aes(date, index, group=agg, colour="Cmax"), linetype=2, size=1) +
-
-  geom_line(data = smrei.ind %>% mutate(Station=9) %>% filter(id == station & agg==5), #round(6*2,0)),
-            aes(date, index, group=agg, colour="Cmax"), linetype=1, size=1) +
-  # geom_line(data = smrei.ind %>% mutate(Station=9) %>% filter(id == station & agg==6), #round(6*2,0)),
-  #           aes(date, index, group=agg, colour="short"), linetype=2, size=.8) +
-  # # geom_line(data = smrei.ind %>% mutate(Station=9) %>% filter(id == station & agg==24), #round(6*2,0)),
-  # #           aes(date, index, group=agg, colour="long"), linetype=2, size=.8) +
+    # standardised ----
+  #   # geom_rect(data=.%>%filter(Cluster!=34) %>% distinct(Cluster, date),
+  #   #           aes(xmin=as.Date("1995-01-15"), xmax=as.Date("1997-01-15"),
+  #   #               ymin=-4, ymax=2), alpha=.1) +
+  # #vlines to show which areas where used for drought corr calcs:
+  geom_vline(data=.%>% filter(Cluster==16 | Cluster==26) %>% 
+               distinct(Cluster,id, date),
+        aes(xintercept=as.Date("2002-08-15"))) +
+  geom_vline(data=.%>% filter(Cluster==16 | Cluster==26) %>% distinct(Cluster, id, date),
+             aes(xintercept=as.Date("2003-06-15"))) +
+  geom_vline(data=.%>%filter(Cluster==34) %>% distinct(Cluster,id, date),
+             aes(xintercept=as.Date("2003-01-15"))) +
+  geom_vline(data=.%>%filter(Cluster==37) %>% distinct(Cluster,id, date),
+             aes(xintercept=as.Date("2004-06-15"))) +
+  geom_vline(data=.%>%filter(Cluster==37) %>% distinct(Cluster,id, date),
+             aes(xintercept=as.Date("2002-05-15"))) +
+  # # short and long aggs for one met type:
+  #   # geom_ribbon(data = . %>%
+  #   #               filter(period == "03" & type==typemax) %>%
+  #   #               mutate(dur=ifelse(agg<Amax, "short", "long")) %>% # customise long and short according to Amax
+  #   #               group_by(id, date, dur) %>%
+  #   #               mutate(mini=min(index, na.rm=TRUE), maxi=max(index, na.rm=TRUE)),
+  #   #           aes(date, ymin=mini, ymax=maxi, colour=dur), #group=agg),
+  #   #         alpha=.2) +
   # 
-  # # geom_line(data = spi.ind %>% mutate(Station=1) %>% filter(id == station & agg==round(4/3,0)),
-  # #           aes(date, index, colour="spei-2"), linetype=2, size=1) +
-  # # geom_line(data = spi.ind %>% mutate(Station=11) %>% filter(id == station & agg==round(6/3,0)),
-  # #           aes(date, index, group=agg, colour="spei-2"), linetype=2, size=1) +
-  # # geom_line(data = spei.ind %>% mutate(Station=12) %>% filter(id == station & agg==round(6/3,0)),
-  # #           aes(date, index, group=agg, colour="spei-2"), linetype=2, size=1) +
-  # # geom_line(data = spei.ind %>% mutate(Station=13) %>% filter(id == station & agg==round(11/3,0)),
-  # #           aes(date, index, colour="spei-2"), linetype=2, size=1) +
-  # # geom_line(data = spei.ind %>% mutate(Station=14) %>% filter(id == station & agg==round(9/3,0)),
-  # #           aes(date, index, group=agg, colour="spei-2"), linetype=2, size=1) +
-  # # geom_line(data = spei.ind %>% mutate(Station=17) %>% filter(id == station & agg==round(6/3,0)),
-  # #           aes(date, index, group=agg, colour="spei-2"), linetype=2, size=1) +
-  # # geom_line(data = spei.ind %>% mutate(Station=7) %>% filter(id == station & agg==round(4/3,0)),
-  # #           aes(date, index, colour="spei-2"), linetype=2, size=1) +
-  # # geom_line(data = spi.ind %>% mutate(Station=8) %>% filter(id == station & agg==round(11/3,0)),
-  # #           aes(date, index, group=agg, colour="spei-2"), linetype=2, size=1) +
-  # geom_line(data = smri.ind %>% mutate(Station=9) %>% filter(id == station & agg==5), #round(5/3,0)),
-  #           aes(date, index, group=agg, colour="smri"), linetype=2, size=1) +
-  # geom_line(data = spei.ind %>% mutate(Station=9) %>% filter(id == station & agg==5), #round(5/3,0)),
-  #           aes(date, index, group=agg, colour="spei"), linetype=2, size=1) +
-  # geom_line(data = smrei.ind %>% mutate(Station=9) %>% filter(id == station & agg==5), #round(5/3,0)),
-  #           aes(date, index, group=agg, colour="smrei"), linetype=2, size=1) +
-  # # 37 ----
-  # #     geom_line(data = spei.ind %>% mutate(Station=32) %>% filter(id == 37 & agg==7),
-  # #             aes(date, index, group=agg, colour="Cmax"), linetype=2, size=1) +
-  # #     geom_line(data = spi.ind %>% mutate(Station=1) %>% filter(id == 37 & agg==7),
-  # #               aes(date, index, group=agg, colour="Cmax"), linetype=2, size=1) +
-  # #     geom_line(data = smrei.ind %>% mutate(Station=10) %>% filter(id == 37 & agg==10),
-  # #               aes(date, index, colour="Cmax"), linetype=2, size=1) +
-  # #     geom_line(data = smrei.ind %>% mutate(Station=12) %>% filter(id == 37 & agg==10),
-  # #               aes(date, index, group=agg, colour="Cmax"), linetype=2, size=1) +
-
-      geom_line(data = spi.ind %>% mutate(Station=34) %>% filter(id == 37 & agg==10), #round(11*2,0)),
-                aes(date, index, group=agg, colour="Cmax"), linetype=1, size=1) +
-  # geom_line(data = spei.ind %>% mutate(Station=34) %>% filter(id == 37 & agg==14), #round(11*2,0)),
-  #           aes(date, index, group=agg, colour="short"), linetype=2, size=.8) +
-  # # geom_line(data = spi.ind %>% mutate(Station=34) %>% filter(id == 37 & agg==24), #round(11*2,0)),
-  # #           aes(date, index, group=agg, colour="long"), linetype=2, size=.8) +
+  # # all aggs and all met types:
+  # geom_ribbon(data = . %>%
+  #             filter(period == "allrec") %>% group_by(id, date, type) %>%
+  #             mutate(mini=min(index, na.rm=TRUE), maxi=max(index, na.rm=TRUE)),
+  #         aes(date, ymin=mini, ymax=maxi, group = type, fill=type, colour=type), alpha=.6) +
   # 
-  # # geom_line(data = spei.ind %>% mutate(Station=32) %>% filter(id == 37 & agg==round(7/3,0)),
-  # #           aes(date, index, group=agg, colour="spei-2"), linetype=2, size=1) +
-  # # geom_line(data = spei.ind %>% mutate(Station=1) %>% filter(id == 37 & agg==round(7/3,0)),
-  # #           aes(date, index, group=agg, colour="spei-2"), linetype=2, size=1) +
-  # # geom_line(data = spi.ind %>% mutate(Station=10) %>% filter(id == 37 & agg==round(10/3,0)),
-  # #           aes(date, index, colour="spei-2"), linetype=2, size=1) +
-  # # geom_line(data = spi.ind %>% mutate(Station=12) %>% filter(id == 37 & agg==round(10/3,0)),
-  # #           aes(date, index, group=agg, colour="spei-2"), linetype=2, size=1) +
-  # geom_line(data = spei.ind %>% mutate(Station=34) %>% filter(id == 37 & agg==10), #round(10/3, 0)),
-  #           aes(date, index, group=agg, colour="spei"), linetype=2, size=1) +
-  # geom_line(data = smri.ind %>% mutate(Station=34) %>% filter(id == 37 & agg==10), #round(10/3, 0)),
-  #           aes(date, index, group=agg, colour="smri"), linetype=2, size=1) +
-  # geom_line(data = smrei.ind %>% mutate(Station=34) %>% filter(id == 37 & agg==10), #round(10/3, 0)),
-  #           aes(date, index, group=agg, colour="smrei"), linetype=2, size=1) +
+  # # different mets same agg period:
+  # geom_line(data=. %>% filter(period=="allrec" & type==typemax & agg == Amax), 
+  #           aes(date, index, group=type, colour="Cmax"), size=1) +
+  # # geom_line(data=. %>% filter(period=="allrec" & type!=typemax & agg == Amax), 
+  # #           aes(date, index, group=type, colour=type), size=.9, linetype=2) +
+  # geom_line(data=. %>% filter(period=="95" & type==typemax & agg == Amax),
+  #           aes(date, index, group=type, colour="Amax"), linetype=2, size=1) +
   # 
-  # #14 ----
-  # # geom_line(data = spi.ind %>% mutate(Station=3) %>% filter(id == 14 & agg==10),
-  # #           aes(date, index, colour="Cmax"), linetype=2, size=1) +
-
-  geom_line(data = spi.ind %>% mutate(Station=2) %>% filter(id == 14 & agg==14),
-            aes(date, index, group=agg, colour="Cmax"), linetype=1, size=1) +
-  # geom_line(data = spi.ind %>% mutate(Station=2) %>% filter(id == 14 & agg==14),
-  #           aes(date, index, group=agg, colour="short"), linetype=2, size=.8) +
-  # # geom_line(data = spi.ind %>% mutate(Station=2) %>% filter(id == 14 & agg==24),
-  # #           aes(date, index, group=agg, colour="long"), linetype=2, size=.8) +
-
-  # geom_line(data = spi.ind %>% mutate(Station=6) %>% filter(id == 14 & agg==17),
-  #           aes(date, index, group=agg, colour="Cmax"), linetype=2, size=1) +
-  # # geom_line(data = spei.ind %>% mutate(Station=3) %>% filter(id == 14 & agg==10),
-  # #           aes(date, index, colour="spei-2"), linetype=2, size=1) +
-  # geom_line(data = spei.ind %>% mutate(Station=2) %>% filter(id == 14 & agg==14),
-  #           aes(date, index, group=agg, colour="spei"), linetype=2, size=1) +
-  # geom_line(data = smri.ind %>% mutate(Station=2) %>% filter(id == 14 & agg==14),
-  #           aes(date, index, group=agg, colour="smri"), linetype=2, size=1) +
-  # geom_line(data = smrei.ind %>% mutate(Station=2) %>% filter(id == 14 & agg==14),
-  #           aes(date, index, group=agg, colour="smrei"), linetype=2, size=1) +
-  # # geom_line(data = spei.ind %>% mutate(Station=6) %>% filter(id == 14 & agg==16),
-  # #           aes(date, index, group=agg, colour="spei-2"), linetype=2, size=1) +
-
-  
-  # geom_hline(yintercept = 0, alpha=.5) +
-  # geom_ribbon(aes(date, ymin=0, ymax=2.5), fill="white")+
-      xlim(as.Date("1970-01-15"),as.Date("1978-01-15")) +
+  geom_line(data=. %>% distinct(Cluster, Station, id, date, sgi),
+    aes(date, sgi, group=Station, colour=Station), alpha = .8) +
+    geom_ribbon(data=. %>% group_by(id, dry_year) %>% filter(any(sgi <= -1.5) & dry_dur > 180) %>%
+                mutate(dry_dur=as.numeric(dry_dur)),
+              aes(x=as.Date(dry_dat), ymin=sgi, ymax=0, group=interaction(dry_start, Station)), alpha=.2)+
+    # general ----
+  geom_hline(yintercept = 0, alpha=.5) +
+    # xlim(as.Date("1989-01-15"),as.Date("1999-01-15")) +
+    scale_x_date(date_breaks = "1 year", date_labels = "%Y",
+                 limits=c(as.Date("1983-01-15"),as.Date("1990-01-15"))) +
     theme_classic() +
-    facet_wrap(~id, ncol=1) +
-    scale_colour_manual(values=c("sgi" = "black", "long" = "red", 
-                                 "short" = "cyan", "Cmax" = "blue",
-                                 "spei" = "red",
-                                 "spi" = "green", "smri" = "yellow",
-                                 "smrei" = "orange",
-                                 "all spi" = "lightgreen",
-                                 "all spei" = "pink",
-                                 "all smri" = "yellow",
-                                 "all smrei" = "orange")) 
+    facet_wrap(~Cluster, ncol=1) 
+    # scale_colour_manual(values=c("sgi" = "black", "long" = "red", 
+    #                              "short" = "cyan", "Cmax" = "blue",
+    #                              "Amax"="cyan",
+    #                              # "spei" = "red",
+    #                              # "spi" = "darkgreen", "smri" = "yellow",
+    #                              # "smrei" = "orange",
+    #                              "smrei" = "#440154ff", 
+    #                              "smri" = "#3b518bff", 
+    #                              "spei" = "#42bb72ff",
+    #                              "spi" = "#fde725ff"
+    #                              # "all spi" = "lightgreen",
+    #                              # "all spei" = "pink",
+    #                              # "all smri" = "yellow",
+    #                              # "all smrei" = "orange"
+    #                              )) +
+  scale_fill_manual(values=c("smrei" = "#440154ff", 
+                             "smri" = "#3b518bff", 
+                             "spei" = "#42bb72ff",
+                             "spi" = "#fde725ff"))
 
 g.ds %>%
   group_by(Station, year) %>%

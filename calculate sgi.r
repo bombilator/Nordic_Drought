@@ -6,6 +6,7 @@ library(dplyr)
 library(ggplot2)
 library(lubridate)
 library(sp)
+library(ggmap)
 
 # find appropriate wells (3) ----
 g <- readRDS("output/process/g_ds_raw2.rds") %>% filter(!is.na(raw_dep)) %>%
@@ -23,23 +24,26 @@ g = as.data.frame(g)
 #            id != "18"& id != "46" & id != "45"& id != "38"& id != "7")
 # g <- g %>% select(-n) %>%  mutate(con= c(NA,diff(year)==1 | diff(year)==0))
 g <- g %>% group_by(Station, Tunnus) %>% mutate(beg = first(year), end = last(year)) 
-a <- g %>% distinct(Station, Tunnus, beg, end, N, E, date, raw_dep, year) %>% #filter(N<=62 & N >=59) %>% 
+a <- g %>% distinct(Station, Tunnus, beg, end, N, E, date, raw_dep, year) %>% 
+  group_by(Station, Tunnus) %>% 
   arrange(N, beg) %>%
-  filter(beg <= 1970 & (is.na(end)|end>=2018) & year >= 1970) %>% 
-  add_count(wt=!is.na(raw_dep), Station, Tunnus, year) %>% group_by(Station, Tunnus) %>% 
-  filter(n > 12) %>% distinct(Station, Tunnus, N, E, year, n) %>% arrange(Station, Tunnus, year) %>%
+  filter(beg <= 1975 & (is.na(end)|end>=2018) & year >= 1975) %>% 
+  add_count(wt=!is.na(raw_dep), Station, Tunnus, year) %>% 
+  filter(n >= 12) %>% distinct(Station, Tunnus, N, E, year, n) %>% arrange(Station, Tunnus, year) %>%
   mutate(lag_y =ifelse(lead(year,1)!=year+1, FALSE, TRUE)) %>% distinct(Station, Tunnus, N, E, lag_y) %>%
   filter(lag_y==FALSE) %>% mutate(id = paste(Station, Tunnus, sep="_"))
-g <- g %>% mutate(id=paste(Station, Tunnus, sep="_")) %>% filter(!id %in% a$id)
+g <- g %>% mutate(id=paste(Station, Tunnus, sep="_")) %>% filter(!id %in% a$id & year >= 1975 & 
+                                                                   beg <= 1975 & (is.na(end)|end>=2018))
 
-ggmap(stamen) + geom_point(data=a %>% 
-                             distinct(Station, Tunnus, N, E), aes(E, N))
-g %>%
-  ggplot(.) + aes(date, raw_dep) + geom_line(aes(colour=as.factor(Station), group=Tunnus), size=1) +
-  geom_point(aes(colour=as.factor(Station), group=Tunnus), size=1) + facet_wrap(~Station)
+ggmap(stamen) + geom_point(data=g %>% distinct(Station, Tunnus, N, E) %>% 
+                             filter(Station==37 | Station==34 | Station==26 | Station==16),
+                           aes(E, N, colour=as.factor(Station)))
+g %>% ggplot(.) + aes(date, raw_dep) + 
+  geom_line(aes(colour=as.factor(Station), group=Tunnus), size=1) +
+  # geom_point(aes(colour=as.factor(Station), group=Tunnus), size=1) + 
+  facet_wrap(~Station)
   xlim(as.Date("2001-01-01"), as.Date("2010-12-30"))
 
-g <- g %>% filter(Station==6 | Station==24| Station==37)
 
 g %>% distinct(Station, Tunnus, id, beg, end)
   
@@ -48,7 +52,7 @@ a <- readRDS("output/for_sgi.rds")
 a <- full_join(a$meas, a$meta) %>% group_by(Omr, Stn) %>% 
   mutate(Start = first(Datum)) %>% filter(is.na(End) & Start <= as.Date("1970-01-01"))
 #%>% filter(Omr == 4) #6 | Omr == 26 | Omr == 37)
-a <- a %>% ungroup() %>% select(Omr, Stn, Datum, UnderOkRor, m_o_h, YEAR, MONTH, Start, Jordart, Akvifertyp, RefNivOkRor, RorHojdOMark,
+a <- a %>% ungroup() %>% select(Omr, Stn, Namn, Datum, UnderOkRor, m_o_h, YEAR, MONTH, Start, Jordart, Akvifertyp, RefNivOkRor, RorHojdOMark,
                   RorHojdOMark, RorLangd, End, N, E) 
 a <- a %>% rename(Cluster = Omr, Station = Stn, date = Datum, year = YEAR, month = MONTH, 
              material = Jordart, type = Akvifertyp, level_m = m_o_h) %>% 
@@ -64,7 +68,6 @@ a %>% filter(year>=1970 & (Cluster==55 | Cluster==37 | Cluster==14)) %>%
   group_by(Cluster, Station) %>% mutate(medwt=median(level_cm, na.rm=TRUE)/100,
                                             medwt_masl=median(level_m, na.rm=TRUE)) %>% 
   distinct(Cluster, Station, material, type, elevation, medwt, medwt_masl) %>% View()
-# write.csv(a %>% distinct(Cluster, Station, N, E), "output/sgi_forTinghai.csv")
 
 a <- a %>% filter(year >= 1970)
 
@@ -103,36 +106,40 @@ g.sgi <- g.sgi %>% mutate(id=paste(Cluster, Station, sep="_"),
                    dry_end= zoo::na.locf(dry_end, fromLast=TRUE, na.rm=FALSE),
                    dry_end=ifelse(dry_end=="-", NA, dry_end),
                    dry_year= year(dry_start)) %>% 
-  group_by(id, dry_year) %>% mutate(dry_dur=as.Date(dry_end) - as.Date(dry_start)) #%>% 
-  right_join(., g.sgi %>% mutate(id=paste(Cluster, Station, sep="_")) %>%
-              group_by(id) %>% filter((year > 2001 & year < 2006 & sgi <= -1.5) |
-                                        (year > 2001 & year < 2006 & sgi <= -1.5)) %>% distinct(id)) %>%
+  group_by(id, dry_year) %>% mutate(dry_dur=as.Date(dry_end) - as.Date(dry_start))
+g.sgi <- g.sgi %>% right_join(., g.sgi %>% group_by(id) %>% filter(any(sgi <= -1.5) &
+                                                                     dry_dur >= 180) %>% distinct(Cluster)) %>%
   ungroup() %>% group_by(id)
-g.sgi <- g.sgi %>%
-  mutate(dry_end=as.Date(dry_end), dry_start = as.Date(dry_start), dry_dat=as.Date(dry_dat)) %>% 
-  right_join(., g.sgi %>% group_by(id) %>% filter(dry_dur > 548) %>%
-               distinct(id))
-# saveRDS(g.sgi %>% filter(Cluster==34 | Cluster==14 | Cluster==55 | Cluster==37), "output/process/sgi_durs.rds")
-a <- g.sgi %>% filter((Cluster==14 & Station==2) |
-                   ( Cluster==55 & Station==9)|
-                   (Station==34 & Cluster==37)) %>%
-  # ungroup() %>% group_by(Cluster, Station) %>% mutate(mean=median(mean_mon, na.rm=TRUE)) %>% 
-  # ungroup() %>% group_by(Cluster, dry_start) %>% 
+# g.sgi <- g.sgi %>%
+#   mutate(dry_end=as.Date(dry_end), dry_start = as.Date(dry_start), dry_dat=as.Date(dry_dat)) %>%
+#   right_join(., g.sgi %>% group_by(id) %>% filter(dry_dur > 548) %>%
+#                distinct(id))
+g.sgi <- g.sgi %>% filter(id %in% (g %>% distinct(Station, Tunnus, N, E, id) %>% 
+                            filter(Station!=10))$id)
+# saveRDS(g.sgi %>% filter(Cluster==37 | Cluster==34 | Cluster==26 | Cluster==16), 
+#         "output/process/sgi_durs.rds")
+g.sgi <- g.sgi %>% filter(Cluster==37 | Cluster==34 | Cluster==26 | Cluster==16)
+g.sgi %>% 
+  ungroup() %>% group_by(id) %>% mutate(mean=median(mean_mon, na.rm=TRUE),
+                                                type="sgi") %>%
   ggplot(.) + 
-  geom_ribbon(data=. %>% group_by(id, dry_year) %>% filter(any(sgi <= -1.5) & dry_dur > 548) %>%
-                mutate(dry_dur=as.numeric(dry_dur)),
-              aes(x=dry_dat, ymin=sgi, ymax=0, group=dry_year), colour="black")+
-  geom_line(aes(date, mean_mon-mean, group = id, colour=Station), alpha=.3) +
   geom_hline(yintercept = 0) +
-  # xlim(as.Date("2001-01-01"), as.Date("2007-12-12"))+
-  facet_wrap(~id, ncol=1) + theme_classic()
+  # geom_ribbon(data=. %>% group_by(id, dry_end) %>% filter(any(sgi <= -1.5) & dry_dur > 180) %>%
+  #               mutate(dry_dur=as.numeric(dry_dur)),
+  #             aes(x=date, ymin=sgi, ymax=0, group=dry_start), colour="black", alpha=.3)+
+  # # geom_line(aes(date, sgi, group = id, colour=Station), alpha=.5) +
+  geom_line(data=. %>% mutate(type="dat"),
+            aes(date, mean_mon-mean, group = id, colour=id), alpha=.3) +
+  # xlim(as.Date("1994-01-01"), as.Date("1998-12-12"))+
+  facet_wrap(~Cluster, ncol=1) + theme_classic()
 # saveRDS(g.sgi, "output/3.sgi.rds")
 
 library(ggmap)
 ggmap(stamen) + geom_point(data=g.sgi %>% distinct(id, N, E), aes(N, E)) +
-  geom_point(data=a %>% mutate(id=paste(Cluster, Station, sep="_")) %>% 
-               filter(!id %in% g.sgi$id) %>% distinct(id, N, E),
-             aes(N, E), alpha=.3)
+  geom_point(data=g.sgi %>% ungroup() %>% mutate(id=paste(Cluster, Station, sep="_")) %>% 
+               # filter(!id %in% g.sgi$id) %>% 
+               distinct(id, Cluster, N, E),
+             aes(N, E, colour=Cluster), size = 2, alpha=.5)
 
 ggmap(stamen) + geom_point(data=g.sgi %>% filter(dry_dur > 548) %>%
                              filter(Cluster==14 | Cluster==55 | Cluster==37) %>%
