@@ -129,7 +129,7 @@ g.df8 <- g.df2  %>%
   filter(year >= 1980 & year <= 1989) %>%
   distinct(Station, Tunnus, N, E, id, 
            date, raw_dep, mean_dep, month, week2, year, g_mean, g_geom, gmax, gmin) %>% 
-  group_by(id, Tunnus, year) %>% mutate(mean_dep = raw_dep - mean(raw_dep, na.rm=TRUE)) %>% 
+  group_by(id, Tunnus, year) %>% mutate(mean_dep = raw_dep - median(raw_dep, na.rm=TRUE)) %>% 
   ungroup() %>% 
   mutate(ymd = as.Date(paste(ifelse(month<=11, "1981", "1980"), 
                         month, ifelse(day(date) != 29, day(date), 28),sep="-"))) %>%
@@ -138,7 +138,7 @@ g.df8 <- g.df2  %>%
   group_by(id, Station, Tunnus, year) %>% mutate(mean_dep = ifelse(is.na(mean_dep), na.approx(mean_dep), mean_dep)) %>%
   
   group_by(id,week2) %>% 
-  mutate(g_geom = mean(mean_dep, na.rm=TRUE),
+  mutate(g_geom = median(mean_dep, na.rm=TRUE),
          gmax=max(mean_dep, na.rm=TRUE),
          gmin =min(mean_dep, na.rm=TRUE),
          stdev = sd(mean_dep, na.rm=TRUE)) %>% ungroup() %>% 
@@ -153,7 +153,7 @@ g.df1 <- g.df2  %>%
   filter(year >= 2001 & year <= 2010) %>%
   distinct(Station, Tunnus, N, E, id, 
            date, raw_dep, mean_dep, month, week2, year, g_mean, g_geom, gmax, gmin)%>%  
-  group_by(id, Tunnus, year) %>% mutate(mean_dep = raw_dep - mean(raw_dep, na.rm=TRUE)) %>% 
+  group_by(id, Tunnus, year) %>% mutate(mean_dep = raw_dep - median(raw_dep, na.rm=TRUE)) %>% 
   ungroup() %>% 
   mutate(ymd = as.Date(paste(ifelse(month<=11, "1981", "1980"), 
                         month, ifelse(day(date) != 29, day(date), 28),sep="-"))) %>%
@@ -162,7 +162,7 @@ g.df1 <- g.df2  %>%
   group_by(id, Station, Tunnus, year) %>% mutate(mean_dep = ifelse(is.na(mean_dep), na.approx(mean_dep), mean_dep)) %>%
   
   group_by(id, week2) %>%
-  mutate(g_geom = mean(mean_dep, na.rm=TRUE),
+  mutate(g_geom = median(mean_dep, na.rm=TRUE),
          gmax=max(mean_dep, na.rm=TRUE),
          gmin =min(mean_dep, na.rm=TRUE),
          stdev = sd(mean_dep, na.rm=TRUE)) %>% ungroup() %>% 
@@ -313,7 +313,7 @@ g.ds2 <- inner_join(g.ds2, freq.filt)
 g.ds8 <- g.ds2  %>% 
   filter(year >= 1980 & year <= 1989) %>% 
   distinct(id, Station, Tunnus, N, E, date, raw_dep, mean_dep, month, week2, year,g_geom, gmax, gmin) %>%  
-  group_by(id, Tunnus, year) %>% mutate(mean_dep = raw_dep - mean(raw_dep, na.rm=TRUE)) %>% 
+  group_by(id, Tunnus, year) %>% mutate(mean_dep = raw_dep - median(raw_dep, na.rm=TRUE)) %>% 
   ungroup() %>% 
   mutate(ymd = as.Date(paste(ifelse(month<=11, "1981", "1980"), 
                         month, ifelse(day(date) != 29, day(date), 28),sep="-"))) %>%
@@ -322,7 +322,7 @@ g.ds8 <- g.ds2  %>%
   group_by(id, Station, Tunnus, year) %>% mutate(mean_dep = ifelse(is.na(mean_dep), na.approx(mean_dep), mean_dep)) %>%
   
   group_by(id, week2) %>%
-  mutate(g_geom = mean(mean_dep, na.rm=TRUE),
+  mutate(g_geom = median(mean_dep, na.rm=TRUE),
          gmax=max(mean_dep, na.rm=TRUE),
          gmin =min(mean_dep, na.rm=TRUE),
          stdev = sd(mean_dep, na.rm=TRUE)) %>% ungroup() %>%
@@ -347,7 +347,7 @@ g.df8 %>% filter(id==station) %>% ggplot(.) +
 g.ds1 <- g.ds2  %>% 
   filter(year >= 2001 & year <= 2010) %>% 
   distinct(id, Station, Tunnus, N, E, date, raw_dep, mean_dep, month, week2, year, g_geom, gmax, gmin)  %>%  
-  group_by(id, Tunnus, year) %>% mutate(mean_dep = raw_dep - mean(raw_dep, na.rm=TRUE)) %>% 
+  group_by(id, Tunnus, year) %>% mutate(mean_dep = raw_dep - median(raw_dep, na.rm=TRUE)) %>% 
   ungroup() %>% 
   mutate(ymd = as.Date(paste(ifelse(month<=11, "1981", "1980"),
                         month, ifelse(day(date) != 29, day(date), 28),sep="-"))) %>%
@@ -356,7 +356,7 @@ g.ds1 <- g.ds2  %>%
   group_by(id, Station, Tunnus, year) %>% mutate(mean_dep = ifelse(is.na(mean_dep), na.approx(mean_dep), mean_dep)) %>%
   
   group_by(id, week2) %>% 
-  mutate(g_geom = mean(mean_dep, na.rm=TRUE),
+  mutate(g_geom = median(mean_dep, na.rm=TRUE),
          gmax=max(mean_dep, na.rm=TRUE),
          gmin =min(mean_dep, na.rm=TRUE),
          stdev = sd(mean_dep, na.rm=TRUE)) %>% ungroup() %>% 
@@ -397,7 +397,7 @@ swe.tibm <- swe.tibm %>% ungroup() %>%
 
 all.tibm <- full_join(tibm, swe.tibm) %>%
   arrange(id, date) #ymd) 
-# saveRDS(all.tibm, "output/process/fennos_tibm_all.rds")
+saveRDS(all.tibm, "output/process/fennos_tibm_all2.rds")
 all.tibm <- all.tibm %>% #readRDS("output/process/fennos_tibm_all.rds") %>% 
   filter(((year >= 1980 & year <= 1989) | (year >= 2001 & year <= 2010))) %>% # &
            # id %in% g$id) %>%  #from plots.R
@@ -438,7 +438,7 @@ pet <- pet %>% ungroup() %>%
 saveRDS(pet,"output/process/fennos_pet_all2.r")
 # pet data ----
 pet <- readRDS("output/process/fennos_pet_all2.R") 
-tibm <- readRDS("output/process/fennos_tibm_all.rds") 
+tibm <- readRDS("output/process/fennos_tibm_all2.rds") 
 
 tibm.pet <- left_join(tibm %>% 
             select(id, RRday, Tday, A, M, Q, P_snow, OSQ,
