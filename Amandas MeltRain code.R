@@ -83,23 +83,29 @@ tibm <- sweden.df %>% group_by(id) %>% tibm2(df =., P = .$Precip, temp = .$Tm)
 saveRDS(tibm, "output/process/sweden_tibm.rds")
 
 # 3 cluster for sgi paper
-south <- read.csv("input/sgi_met/14.csv") %>% mutate(Cluster="14") %>% rename(date=X)
-mid <- read.csv("input/sgi_met/55.csv")%>% mutate(Cluster="55") %>% rename(date=X)
-met <- full_join(south, mid)
-north <- read.csv("input/sgi_met/37.csv") %>% mutate(Cluster="37") %>% rename(date=X)
-met <- full_join(met, north)
-met <- met %>% rename(precip = starts_with("Nederbö"),
-                      temp = starts_with("Temper"))
-rm(south, mid, north)
-met <- met %>% mutate(N=ifelse(Cluster=="14", 57.39736, 59.40424), N = ifelse(Cluster=="37", 66.417632, N),
-                      E = ifelse(Cluster==14, 13.61697, 18.19911), E = ifelse(Cluster=="37", 21.702111, E))
-saveRDS(met, "input/sgi_met/met.rds")
-met <- readRDS("input/sgi_met/met.rds")
-tibm <- met %>% filter(as.Date(date) >= as.Date("1965-01-01")) %>%
-  group_by(Cluster) %>% tibm2(df=., id = .$Cluster, date = .$date, P =.$precip, temp = .$temp)
-tibm2 <- tibm %>% rename(Cluster=id) %>% mutate(Cluster=as.character(Cluster)) %>% 
-  full_join(., met %>% select(Cluster, N, E)) # for some reason N and E are saved opposite in tibm
-saveRDS(tibm, "output/process/3clusters_tibm.rds")
+# south <- read.csv("input/sgi_met/14.csv") %>% mutate(Cluster="14") 
+# mid <- read.csv("input/sgi_met/55.csv")%>% mutate(Cluster="55") 
+# met <- full_join(south, mid)
+# north <- read.csv("input/sgi_met/37.csv") %>% mutate(Cluster="37")
+# met <- full_join(met, north)
+# met <- met %>% rename(precip = starts_with("Nederbö"),
+#                       temp = starts_with("Temper"))
+# rm(south, mid, north)
+# met <- met %>% mutate(N=ifelse(Cluster=="14", 57.39736, 59.40424), N = ifelse(Cluster=="37", 66.417632, N),
+#                       E = ifelse(Cluster==14, 13.61697, 18.19911), E = ifelse(Cluster=="37", 21.702111, E))
+# saveRDS(met, "input/sgi_met/met.rds")
+met <- readRDS("input/sgi_met/14/met.rds") %>% rename(precip = starts_with("Nederbö"),
+                                                      temp = starts_with("Temper"),
+                                                      id=FNID) %>% 
+  group_by(id) %>% mutate(N=first(N), E=first(E))
+saveRDS(met, "input/sgi_met/14/met.rds")
+met <- readRDS("input/sgi_met/14/met.rds")
+
+tibm <- met %>% #filter(as.Date(date) >= as.Date("1965-01-01")) %>%
+  group_by(id) %>% tibm2(df=., id = .$id, date = .$date, P =.$precip, temp = .$temp)
+tibm2 <- tibm %>% #rename(Cluster=id) %>% mutate(Cluster=as.character(Cluster)) %>% 
+  full_join(., met %>% select(id, N, E)) # for some reason N and E are saved opposite in tibm
+saveRDS(tibm, "output/process/clusters_tibm1911.rds")
 
 
 # 

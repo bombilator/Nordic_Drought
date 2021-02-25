@@ -15,7 +15,7 @@
 rm(list = ls())
 
 library(magrittr); library(purrr); library(ggplot2); library(dplyr); library(tidyverse)
-library(sp);library(lubridate)
+library(sp);library(lubridate); library(ggmap)
 
 # Read data fi ----
 g.df <- #readRDS("output/process/g_df.rds") %>% 
@@ -36,7 +36,8 @@ g.df <- #readRDS("output/process/g_df.rds") %>%
 # 670 measurements = 12 months * 1.8 measurements a month * 31 years, then 1 % is 6.7
 # -> 670-6.7
 # let's just automate it to n > than mean n (=mean dataset length) - 1%
-g.df <- g.df %>% filter(year >= 1980 & year <=2010) %>% mutate(period=ifelse(year<1990, 1, 8)) %>% 
+g.df <- g.df %>% #filter(year >= 1980 & year <=2010) %>% mutate(period=ifelse(year<1990, 1, 8)) %>% 
+  filter(year >= 1970 & year <=2017) %>%
   add_count(wt=!is.na(raw_dep), Station, Tunnus) 
 filter <- mean(g.df$n) - 0.01*mean(g.df$n)
 g.df <- g.df %>% filter(n > filter)
@@ -130,7 +131,12 @@ g.ds8 <- readRDS("output/process/g_ds8_raw2.rds")%>% ungroup() %>%
 
 
 meta.s <- readRDS("output/process/swe_meta.RDS")
-
+# find the ids still in the dataset with wells in rock
+rock <- meta.s %>% distinct(Omr_stn, Akvifertyp) %>% filter(grepl("berg",Akvifertyp)) %>% 
+  mutate(Station = sub("_(.*)", "", Omr_stn), Tunnus = sub("(.*)_", "", Omr_stn)) %>% 
+  left_join(., g %>% filter(country=="swe") %>% distinct(Station, Tunnus, id)) %>% 
+  filter(!is.na(id)) %>% distinct(id)
+rm(meta.s)
 
 # Combine fi and swe data ----
 # homogenize water level data
@@ -177,8 +183,10 @@ tibm.pet1 <- readRDS("output/process/fennos_tibm_pet1.rds") %>% filter(id %in% g
 #   arrange(id, date)
 # all.tibm <- all.tibm %>% filter(date <= as.Date("2010-12-31"))
 # saveRDS(all.tibm, "output/process/fennos_tibm_all_2.R")
-tibm <- readRDS("output/process/fennos_tibm_all2.rds") %>% select(E, N, id, date,Tday, RRday, Q, OSQ)
-pet <- readRDS("output/process/fennos_pet_all.r")
+tibm <- readRDS("output/process/fennos_tibm_all2.rds") %>% 
+  dplyr::select(E, N, id, date,Tday, RRday, Q, OSQ)
+pet <- readRDS("output/process/fennos_pet_all.r") %>%
+  mutate(pet = pet*2)
 
 # g.df <- readRDS("output/process/sgi_durs.rds") %>% ungroup() %>% #readRDS("output/3.sgi.rds") %>% 
 #   group_by(id) %>% mutate(date = as.Date(paste(format(date, "%Y-%m"), "-15", sep=""))) %>% 
@@ -212,10 +220,31 @@ a <- a %>% select(-End, -RorHojdOMark, -E, -N)
 a <- left_join(a, stand %>% distinct(id, N, E))
 
 # Background map and coordinates ----
-bbox = as.numeric(c(11, 55, 32, 70)) # Sweden: c(11,55,24,69)) # Sweden and Finland: c(11, 55, 32, 70))
+bbox = as.numeric(c(8, 54, 33, 71)) # Sweden: c(11,55,24,69)) # Sweden and Finland: c(11, 55, 32, 70))
 names(bbox) <- c('left','bottom','right','top')
 source("rfuncs/get_stamenmapPNG.R")
-stamen <- get_stamenmapPNG(bbox, zoom = 6, maptype = "toner-background")
+stamen <- get_stamenmapPNG(bbox, zoom = 6, maptype = "toner-background", color="color",
+                           force = TRUE) 
+rm(bbox)
+
+# library(maps)
+# bg <-map('world',col="grey", fill=FALSE, 
+#          bg="white", lwd=0.05, mar=rep(0,4),border=0, 
+#          ylim=c(54.5,71), xlim=c(9,32.5),  plot=TRUE)
+
+library(rgdal)
+shp.file <- readOGR("C:/Users/xnygmi/Desktop/data/paper_lmtrends", 
+        "sea_pol")
+shp.file <- fortify(shp.file)
+coordinates(shp.file) = ~long+lat
+proj4string(shp.file) = CRS("+init=epsg:3067")
+shp.file = spTransform(shp.file, CRS("+proj=longlat + datum=WGS84"))
+shp.file <- as.data.frame(shp.file)
+map <- ggplot() +
+  geom_polygon(data = shp.file, aes(x = long, y = lat, group = group),
+            color = NA, fill = 'grey', size = .2)
+map_projected <- map +
+  coord_map()
 
 gstat <- g %>% distinct(Tunnus, Station, id, N, E, country)
 plots <- gstat %>% filter(country=="swe") %>% distinct(Tunnus, Station, id, N, E)
@@ -230,7 +259,7 @@ plotf = spTransform(plotf, CRS("+proj=longlat + datum=WGS84"))
 plotf = as.data.frame(plotf)
 plot <- full_join(plots, plotf)
 rm(plotf, plots, gstat)
-
+plot <- plot %>% filter(!id %in% rock$id)
 # library(rworldmap)
 # newMap <- getMap(resolution="low")  # you may use resolution="low"
 # plot(newMap, xlim=c(25, 27), ylim=c(54, 70), usePolypath=FALSE) # Sweden and Finland
@@ -510,7 +539,8 @@ for(i in 1:length(wb_gw$id)){
 
 # general surface water balance ----
 # a = 
-context <- tibm %>% ungroup() %>% distinct(id, date, Tday, RRday) %>% filter(date >= as.Date("1980-01-01")) %>% 
+context <- tibm %>% ungroup() %>% distinct(id, date, Tday, RRday) %>% 
+  filter(date >= as.Date("1980-01-01") & date <= as.Date("1990-01-01")) %>% 
   rename(ymd=date) %>% 
   filter(id== "f_1162" | id == "s_157" | id == "f_3453" | id == "s_98" |id == "f_131" | id == "s_46" |
            id=="s_93" | id == "f_2465")  %>% distinct(id, ymd, Tday, RRday) %>% 
@@ -531,7 +561,7 @@ a <- context %>% ungroup() %>% group_by(id) %>% mutate(median=raw_dep - median(r
                                                   type="h") %>% 
   # filter(Tunnus!="1204p8") %>% 
             filter(id==2) %>% #| (id==3 & Tunnus =="1204p10") | (id == 7 & Tunnus ==9) | id == 8) %>%
-  ggplot(.) + geom_col(data=. %>% mutate(type="P"), aes(ymd, P), colour="black", fill="black", alpha=.5) + 
+  ggplot(.) + geom_col(data=. %>% mutate(type="P"), aes(ymd, P), colour="black", fill="black") + 
   geom_line(data=. %>% mutate(type="T"), aes(ymd, Temp), colour="black") + 
   geom_line(aes(ymd, raw_dep, group=Tunnus), colour="black", size=.7) +
       # scale_y_continuous(sec.axis=sec_axis(~(.*10), "P [mm], T [˚C]")) +
@@ -548,7 +578,7 @@ b <- context %>% ungroup() %>% group_by(id) %>% mutate(median=raw_dep - median(r
                                                   name= paste(id," [", Tunnus, "]", sep=""),
                                                   type="h") %>% 
   filter(id==3 & Tunnus =="1204p10") %>%
-  ggplot(.) + geom_col(data=. %>% mutate(type="P"), aes(ymd, P), colour="black", fill="black", alpha=.5) + 
+  ggplot(.) + geom_col(data=. %>% mutate(type="P"), aes(ymd, P), colour="black", fill="black") + 
   geom_line(data=. %>% mutate(type="T"), aes(ymd, Temp), colour="black") + 
   geom_line(aes(ymd, raw_dep, group=Tunnus), colour="black", size=.7) +
   ylab("") + xlab("") +  
@@ -564,7 +594,7 @@ c <- context %>% ungroup() %>% group_by(id) %>% mutate(median=raw_dep - median(r
                                                   type="h") %>% 
   filter((id == 7 & Tunnus ==9)) %>%
   ggplot(.) + geom_col(data=. %>% mutate(type="P"), aes(ymd, P), 
-                       colour="black", fill="black", alpha=.5) + 
+                       colour="black", fill="black") + 
   geom_line(data=. %>% mutate(type="T"), aes(ymd, Temp), colour="black") + 
   geom_line(aes(ymd, raw_dep, group=Tunnus), colour="black", size=.7) +
   ylab("") + xlab("") +
@@ -579,7 +609,7 @@ d <- context %>% ungroup() %>% group_by(id) %>% mutate(median=raw_dep - median(r
                                                   name= paste(id," [", Tunnus, "]", sep=""),
                                                   type="h") %>% 
   filter(id==8) %>%
-  ggplot(.) + geom_col(data=. %>% mutate(type="P"), aes(ymd, P), colour="black", fill="black", alpha=.5) + 
+  ggplot(.) + geom_col(data=. %>% mutate(type="P"), aes(ymd, P), colour="black", fill="black") + 
   geom_line(data=. %>% mutate(type="T"), aes(ymd, Temp), colour="black") + 
   geom_line(aes(ymd, raw_dep, group=Tunnus), colour="black", size=.7) +
   ylab("") + xlab("") + 
@@ -791,6 +821,7 @@ plotf = spTransform(plotf, CRS("+proj=longlat + datum=WGS84"))
 plotf = as.data.frame(plotf)
 plot <- full_join(plots, plotf)
 rm(plotf, plots, gstat)
+
 # coordinates(plot) = ~E+N
 # proj4string(plot) = CRS("+proj=longlat + datum=WGS84")
 # raster::shapefile(plot, "selected_obs_wells_all.shp", overwrite=TRUE)
@@ -883,13 +914,16 @@ raster::shapefile(geo2, "fennos_geology_reclass.shp", overwrite=TRUE)
 # plot mean water table ----
 library(ggrepel)
 
-g %>% distinct(id, Tunnus, mean_wt, elevation, N, country) %>% #filter(id %in% dtibm$id) %>% 
+g %>% group_by(id, Tunnus) %>% 
+  mutate(mean_wt = median(raw_dep, na.rm=TRUE)) %>% 
+  distinct(id,
+           Tunnus, mean_wt, elevation, N, country) %>% #filter(id %in% dtibm$id) %>% 
   mutate(Nn = round(N*0.001,0)) %>%
   ggplot(.) + 
   theme_classic() +
   aes(mean_wt, N ) + #Nn) + #, colour = max(gmax)-min(gmin)) + 
   geom_point(alpha=.4, aes(colour = country)) +
-  geom_label_repel(data = g %>% filter(mean_wt > 10 | mean_wt < 0) %>% 
+  geom_label_repel(data = . %>% filter(mean_wt > 10 | mean_wt < 0) %>% 
                      distinct(id, Tunnus, mean_wt, elevation, N) %>%  
                      mutate(Nn = round(N*0.001,0)),
                                        aes(mean_wt, N, label=id),
@@ -908,10 +942,11 @@ g %>% group_by(id, Tunnus) %>%
   distinct(id, Tunnus, mean_dep) %>% 
   ggplot(.) + aes(mean_dep) + geom_histogram(binwidth=3) +
   # geom_bar(stat="identity", width=0.5) + 
-  xlab("median piezometric level depth, m") + 
-  theme(axis.text = element_text(size=18), axis.title = element_text(size=18), panel.background=element_blank(),
-        panel.border=element_rect(colour="black", fill=NA)) +
-  ylab("")
+  xlab("depth below surface [m]") + ylab("piezometers")+
+  theme(axis.text = element_text(size=12), axis.title = element_text(size=12), 
+        panel.background=element_blank(),
+        panel.border=element_rect(colour="black", fill=NA)) 
+
 
 # manual annual fluctuations ts, classes ----
   
@@ -1478,8 +1513,10 @@ head(g8)
 head(g1)
 head(g)
 diff <- g %>% filter(!is.na(raw_dep)) %>% 
-  distinct(date, Tunnus, year, id, raw_dep) %>% group_by(Tunnus) %>% 
-  mutate(stdev_rec = sd(raw_dep, na.rm =TRUE),
+  distinct(date, Tunnus, year, id, elevation, raw_dep) %>% group_by(id, Tunnus) %>% 
+  mutate(#raw_dep = elevation - raw_dep,  # get masl of water table, gets different results as
+    #the magnitude difference is smaller, e.g. masl 117.6 and mean 117.5 vs depth 0.4 mean 0.5
+         stdev_rec = sd(raw_dep, na.rm =TRUE),
          mean_rec = median(raw_dep, na.rm =TRUE)) %>% 
   mutate(month = month(date),
     season = ifelse(month == 9 | month == 11 | month == 10, "Sep-Nov", NA),
@@ -1492,7 +1529,7 @@ diff <- g %>% filter(!is.na(raw_dep)) %>%
     mean_all = round(median(raw_dep, na.rm = TRUE),1)) 
 
 diff8 <- diff %>% filter(year <= 1989 & year >= 1980) %>% 
-  group_by(Tunnus, season) %>% 
+  group_by(id,Tunnus, season) %>% 
   mutate(stdev_8 = sd(raw_dep, na.rm = TRUE),
          mean_8 = median(raw_dep, na.rm = TRUE),
          min_8 = min(raw_dep, na.rm = TRUE),
@@ -1502,7 +1539,7 @@ diff8 <- diff %>% filter(year <= 1989 & year >= 1980) %>%
            min_8, max_8, mean_all, mean_rec)
 
 diff1 <- diff %>% filter(year <= 2010 & year >= 2001) %>% 
-  group_by(Tunnus, season) %>% #before Tunnus and season and year
+  group_by(id, Tunnus, season) %>% #before Tunnus and season and year
   mutate(stdev_1 = sd(raw_dep, na.rm = TRUE),
          mean_1 = median(raw_dep, na.rm = TRUE),
          min_1 = min(raw_dep, na.rm = TRUE),
@@ -1524,56 +1561,9 @@ diff <- diff %>%
          group = ifelse(lat > 63, "63?-", group))
 
 
-metdiff <- tibm %>% distinct(id, date, Tday, RRday) %>% ungroup() %>% 
-  left_join(., pet %>% distinct(id, E, N) %>% ungroup(), by=c("id")) %>%
-  filter(!is.na(N) & !is.na(E)) %>%
-  mutate(month=month(date), year=year(date)) %>% group_by(id, year, month) %>% 
-  mutate(season = ifelse(month == 9 | month == 11 | month == 10, "Sep-Nov", NA),
-         season = ifelse(month == 1 | month == 2 | 
-                           month == 12, "Dec-Feb", season),
-         season = ifelse(month == 4 | month == 5 | 
-                           month == 3, "Mar-May", season),
-         season = ifelse(month == 7 | month == 8 | 
-                           month == 6, "Jun-Aug", season)) %>% 
-  mutate(group = ifelse(N < 59, "-59?", NA),
-         group = ifelse(N >= 59, "59?-63?", group),
-         group = ifelse(N > 63, "63?-", group))
-
-metdiff8 <- metdiff %>% filter(year <= 1989 & year >= 1980) %>% 
-  # mutate(ymd = as.Date(paste(ifelse(month(date)<=11, "1981", "1980"), 
-  #                            month(date), ifelse(day(date) != 29, day(date), 28),
-  #                            sep="-"))) %>% group_by(group, ymd) %>% 
-  #                        mutate(mean  =median(qpet, na.rm=TRUE)) %>% distinct(group, ymd, mean_8)
-  group_by(id, season) %>%
-  mutate(sd_t8 = sd(Tday, na.rm = TRUE),
-         mean_t8 = mean(Tday, na.rm = TRUE),
-         sd_p8 = sd(RRday, na.rm=TRUE),
-         mean_p8 = mean(RRday, na.rm=TRUE)) %>%
-  distinct(id,sd_t8, sd_p8, mean_t8, mean_p8, season)
-
-metdiff1 <- metdiff %>% filter(year <= 2010 & year >= 2001) %>% 
-  # mutate(ymd = as.Date(paste(ifelse(month(date)<=11, "1981", "1980"), 
-  #                            month(date), ifelse(day(date) != 29, day(date), 28),
-  #                            sep="-"))) %>% group_by(group, ymd) %>% 
-  # mutate(mean  =median(qpet, na.rm=TRUE)) %>% distinct(group, ymd, mean_8)
-  group_by(id, season) %>%
-  mutate(sd_t1 = sd(Tday, na.rm = TRUE),
-         mean_t1 = mean(Tday, na.rm = TRUE),
-         sd_p1 = sd(RRday, na.rm=TRUE),
-         mean_p1 = mean(RRday, na.rm=TRUE)) %>%
-  distinct(id, sd_t1, sd_p1, mean_t1, mean_p1, season)
-
-# metdiff8 %>% ggplot(.) + aes(ymd, mean, group=group) %>% geom_line(aes(linetype="P1")) +
-#   geom_line(data=metdiff1, aes(linetype="P2"))
-
-metdiff <- full_join(metdiff %>% distinct(id, N, E, group), 
-                  metdiff1)
-metdiff <- full_join(metdiff, metdiff8) 
-
-metdiff %>% mutate(temp = mean_t8/(mean_t1 - mean_t8), prec = mean_p8/(mean_p1 - mean_p8)) # difference in %
 # Metrics plots ----
 s <- ggplot(diff) + 
-  aes((stdev_8/mean_rec), (stdev_1/mean_rec), group = group) +
+  aes((stdev_8/mean_rec), (stdev_1/mean_rec), group = Tunnus) +
         geom_point(aes(fill=as.factor(group), shape = season),shape =21, colour ="grey19",
                    alpha = .8, size = 2) +
         geom_abline(intercept = 0, slope = 1) +
@@ -1582,47 +1572,55 @@ s <- ggplot(diff) +
   #                              "59˚-63˚" = "#8dd544ff",
   #                              "63˚-" = "#218f8dff"), guides(name="Latitude")) +
   geom_abline(intercept = 0, slope = 1) + 
-  scale_x_continuous(trans='log10', limits = c(0.005, 20)) +
-  scale_y_continuous(trans='log10', limits = c(0.005, 20)) +
+  # scale_x_continuous(trans='log10', limits = c(0.005, 20)) +
+  # scale_y_continuous(trans='log10', limits = c(0.005, 20)) +
+  scale_x_continuous(trans='log10', limits = c(0.0001, 10)) +
+  scale_y_continuous(trans='log10', limits = c(0.0001, 10)) +
   theme(axis.text =element_text(size=12)) +
-  facet_wrap(~season) + xlab("sd. depth P1")+
-  ylab("sd. depth P2") 
-m <- ggplot(diff) + 
-  aes((mean_8/mean_rec), (mean_1/mean_rec), group = group) +
+  facet_wrap(~season) + xlab("sd. P1")+
+  ylab("sd. P2") 
+m <- ggplot(diff %>% group_by(id, Tunnus)) + 
+  aes((mean_8/mean_rec), (mean_1/mean_rec), group = Tunnus) +
   geom_point(aes(fill=as.factor(group), shape = season),shape =21, colour ="grey19",
              alpha = .8, size = 2) +
   geom_abline(intercept = 0, slope = 1) + 
-  scale_x_continuous(trans='log10', limits = c(0.01,5))+
-  scale_y_continuous(trans='log10', limits = c(0.01,5))+
+  # scale_x_continuous(trans='log10', limits = c(0.01,5))+
+  # scale_y_continuous(trans='log10', limits = c(0.01,5))+
+  scale_x_continuous(trans='log10', limits = c(0.8,1.2))+
+  scale_y_continuous(trans='log10', limits = c(0.8,1.2))+
   # ylim(0,4) + xlim(0,4) +
   scale_fill_viridis_d(guides(name="Latitude"), direction=-1) +
   # scale_fill_manual(values=c("-59˚"= "#fde725ff",
   #                            "59˚-63˚" = "#8dd544ff",
   #                            "63˚-" = "#218f8dff"), guides(name="Latitude")) + 
   theme(axis.text =element_text(size=12)) + #theme_classic() + 
-  facet_wrap(~season) + xlab("median depth P1")+
-  ylab("median depth P2") 
-min <- ggplot(diff) + 
-  aes((min_8/mean_rec), (min_1)/mean_rec, group = group) +
+  facet_wrap(~season) + xlab("median P1")+
+  ylab("median P2") 
+min <- ggplot(diff%>% group_by(id, Tunnus)) + 
+  aes((min_8/mean_rec), (min_1)/mean_rec, group = Tunnus) +
   geom_point(aes(fill=as.factor(group), shape = season), shape =21, colour ="grey19",
              alpha = .8, size = 2) +
   geom_abline(intercept = 0, slope = 1) +  
-  scale_x_continuous(trans='log10', limits = c(0.01,3))+
-  scale_y_continuous(trans='log10', limits = c(0.01,3))+
+  # scale_x_continuous(trans='log10', limits = c(0.01,3))+
+  # scale_y_continuous(trans='log10', limits = c(0.01,3))+
+  scale_x_continuous(trans='log10', limits = c(0.25,1.15)) +
+  scale_y_continuous(trans='log10', limits = c(0.25,1.15)) +
   scale_fill_viridis_d(guides(name="Latitude"), direction=-1) +
   # scale_fill_manual(values=c("-59˚"= "#fde725ff",
   #                            "59˚-63˚" = "#8dd544ff",
   #                            "63˚-" = "#218f8dff"), guides(name="Latitude")) + 
   theme(axis.text =element_text(size=12)) +# theme_classic() + 
-  facet_wrap(~season) + xlab("min. depth P1")+
-  ylab("min. depth P2")
-max <- ggplot(diff) + 
+  facet_wrap(~season) + xlab("min. P1")+
+  ylab("min. P2")
+max <- ggplot(diff%>% group_by(id, Tunnus)) + 
   aes((max_8)/mean_rec, (max_1)/mean_rec, group = group) +
   geom_point(aes(fill=as.factor(group) , shape = season), shape =21, colour ="grey19",
              alpha = .8, size = 2) +
   geom_abline(intercept = 0, slope = 1) + 
-  scale_x_continuous(trans='log10', limits = c(.1,20))+
-  scale_y_continuous(trans='log10', limits = c(.1,20))+ 
+  # scale_x_continuous(trans='log10', limits = c(.1,20))+
+  # scale_y_continuous(trans='log10', limits = c(.1,20))+
+  scale_x_continuous(trans='log10', limits = c(.9,1.8))+
+  scale_y_continuous(trans='log10', limits = c(.9,1.8))+ 
   scale_fill_viridis_d(guides(name="Latitude"), direction=-1) +
   # scale_fill_manual(values=c("-59˚"= "#fde725ff",
   #                            "59˚-63˚" = "#8dd544ff",
@@ -1631,58 +1629,29 @@ max <- ggplot(diff) +
   #                     values=c("-59˚" = "orange", "59˚-63˚" = "olivedrab3",
   #                              "63˚-"="darkgreen")) +
   theme(axis.text =element_text(size=12)) + #theme_classic() + 
-  facet_wrap(~season) + xlab("max. depth P1")+
-  ylab("max. depth P2") 
+  facet_wrap(~season) + xlab("max. P1")+
+  ylab("max. P2") 
 
 
 library(cowplot)
-prow <- plot_grid(m + theme(legend.position = "none"), 
-          s + theme(legend.position = "none"), 
-          min  + theme(legend.position = "none"), 
-          max + theme(legend.position = "none"), 
+prow <- plot_grid(m + theme(legend.position = "none", 
+                            panel.background = element_rect("white"),
+                            axis.line = element_line("black")), 
+          s + theme(legend.position = "none", 
+                    panel.background = element_rect("white"),
+                    axis.line = element_line("black")), 
+          min  + theme(legend.position = "none", 
+                       panel.background = element_rect("white"),
+                       axis.line = element_line("black")), 
+          max + theme(legend.position = "none", 
+                      panel.background = element_rect("white"),
+                      axis.line = element_line("black")), 
           align = "hv", axis = "lb", ncol = 2,
   rel_heights = c(1,1))
 legend <- get_legend(m)
 plot_grid(prow, legend, rel_widths = c(3, .5))
 
 
-max <- ggplot(diff) + aes((max_8/mean_qpet), (max_1/mean_qpet), group = id) +
-  geom_point(aes(fill=as.factor(group)),shape =21, colour ="grey19",alpha = .8, size = 2) +
-  geom_abline(intercept = 0, slope = 1) + ylim(0, 160) + xlim(0,160) + 
-  scale_fill_viridis_d(guides(name="Latitude"), direction=-1) +
-  theme(axis.text =element_text(size=12), panel.background=element_blank(), axis.line=element_line(colour="black")) + 
-  facet_wrap(~season) + xlab("max R - PET [mm] P1")+
-  ylab("max R - PET [mm] P2")
-m <- ggplot(diff) + aes((mean_8/mean_qpet), (mean_1/mean_qpet), group = id) +
-  geom_point(aes(fill=as.factor(group)),shape =21, colour ="grey19",alpha = .8, size = 2) +
-  geom_abline(intercept = 0, slope = 1) + ylim(-20, 55) + xlim(-10,55) +
-  scale_fill_viridis_d(guides(name="Latitude"), direction=-1) + 
-  theme(axis.text =element_text(size=12), panel.background=element_blank(), axis.line=element_line(colour="black")) + 
-  facet_wrap(~season) + xlab("median R - PET [mm] P1")+
-  ylab("median R - PET [mm] P2")
-min <- ggplot(diff) + aes((min_8/mean_qpet), (min_1/mean_qpet), group = id) +
-  geom_point(aes(fill=as.factor(group)),shape =21, colour ="grey19",alpha = .8, size = 2) +
-  geom_abline(intercept = 0, slope = 1) + ylim(-55, 15) + xlim(-55,15) +
-  scale_fill_viridis_d(guides(name="Latitude"), direction=-1) +
-  theme(axis.text =element_text(size=12), panel.background=element_blank(), axis.line=element_line(colour="black")) + 
-  facet_wrap(~season) + xlab("min R - PET [mm] P1")+
-  ylab("min R - PET [mm] P2")
-s <- ggplot(diff) + aes((stdev_8/mean_qpet), (stdev_1/mean_qpet), group = id) +
-  geom_point(aes(fill=as.factor(group)),shape =21, colour ="grey19",alpha = .8, size = 2) +
-  geom_abline(intercept = 0, slope = 1) + ylim(0, 55) + xlim(0,55) +
-  scale_fill_viridis_d(guides(name="Latitude"), direction=-1) +
-  theme(axis.text =element_text(size=12), panel.background=element_blank(), axis.line=element_line(colour="black")) + 
-  facet_wrap(~season) + xlab("sd R - PET [mm] P1")+
-  ylab("sd R - PET [mm] P2")
-
-prow <- plot_grid(m + theme(legend.position = "none"), 
-                  s + theme(legend.position = "none"), 
-                  min  + theme(legend.position = "none"), 
-                  max + theme(legend.position = "none"), 
-                  align = "hv", axis = "lb", ncol = 2,
-                  rel_heights = c(1,1))
-legend <- get_legend(m)
-plot_grid(prow, legend, rel_widths = c(3, .5))
 
 # Metrics stats ----
 wilcox.test((diff %>% filter(season=="Dec-Feb"))$mean_8, (diff %>% filter(season=="Dec-Feb"))$mean_1)$p.value
@@ -1715,8 +1684,10 @@ wilcox.test((diff %>% filter(season=="Sep-Nov"))$min_8, (diff %>% filter(season=
 
 wilcox.test((diff %>% filter(season=="Dec-Feb"))$max_8, (diff %>% filter(season=="Dec-Feb"))$max_1)$p.value
 
-wilcox.test((diff %>% filter(season=="Mar-May"))$max_8, (diff %>% filter(season=="Mar-May"))$max_1)$p.value
-wilcox.test((diff %>% filter(season=="Jun-Aug"))$max_8, (diff %>% filter(season=="Jun-Aug"))$max_1, paired=TRUE)#$p.value
+wilcox.test((diff %>% filter(season=="Mar-May" & group=="-59?"))$max_8, 
+            (diff %>% filter(season=="Mar-May" & group=="-59?"))$max_1)#$p.value
+wilcox.test((diff %>% filter(season=="Jun-Aug"))$max_8, 
+            (diff %>% filter(season=="Jun-Aug"))$max_1, paired=TRUE)#$p.value
 wilcox.test((diff %>% filter(season=="Sep-Nov"))$max_8, 
             (diff %>% filter(season=="Sep-Nov"))$max_1, paired=FALSE, alternative="l", conf.int=TRUE)#$p.value
 
@@ -1733,54 +1704,664 @@ sign <- diff %>% distinct(id, Tunnus, season, mean_rec, stdev_1,
          max_1 = max_1/mean_rec, 
          max_8 = max_8/mean_rec) %>% 
   group_by(season, group) %>%
-  mutate(sd = ((median(stdev_1, na.rm=TRUE) - median(stdev_8, na.rm=TRUE))/median(stdev_8, na.rm=TRUE)) %>% round(.,3),
-         sd.p = wilcox.test(stdev_8, stdev_1, paired=TRUE)$p.value%>% round(.,3),
-         median = ((median(mean_1, na.rm=TRUE) - median(mean_8, na.rm=TRUE))/median(mean_8, na.rm=TRUE)) %>% round(.,2),
-         median.p = wilcox.test(mean_8, mean_1, paired=TRUE)$p.value%>% round(.,3),
-         min = ((median(min_1, na.rm=TRUE) - median(min_8, na.rm=TRUE))/median(min_8, na.rm=TRUE)) %>% round(.,2),
-         min.p = wilcox.test(min_8, min_1, paired=TRUE)$p.value%>% round(.,3),
-         max = ((median(max_1, na.rm=TRUE) - median(max_8, na.rm=TRUE))/median(max_8, na.rm=TRUE)) %>% round(.,2),
-         max.p = wilcox.test(max_8, max_1, paired=TRUE)$p.value%>% round(.,3)) %>%
+  # mutate(sd = ((median(stdev_1, na.rm=TRUE) - median(stdev_8, na.rm=TRUE))/median(stdev_8, na.rm=TRUE)) %>% round(.,3),
+  #        sd.p = wilcox.test(stdev_8, stdev_1, paired=TRUE)$p.value%>% round(.,3),
+  #        median = ((median(mean_1, na.rm=TRUE) - median(mean_8, na.rm=TRUE))/median(mean_8, na.rm=TRUE)) %>% round(.,2),
+  #        median.p = wilcox.test(mean_8, mean_1, paired=TRUE)$p.value%>% round(.,3),
+  #        min = ((median(min_1, na.rm=TRUE) - median(min_8, na.rm=TRUE))/median(min_8, na.rm=TRUE)) %>% round(.,2),
+  #        min.p = wilcox.test(min_8, min_1, paired=TRUE)$p.value%>% round(.,3),
+  #        max = ((median(max_1, na.rm=TRUE) - median(max_8, na.rm=TRUE))/median(max_8, na.rm=TRUE)) %>% round(.,2),
+  #        max.p = wilcox.test(max_8, max_1, paired=TRUE)$p.value%>% round(.,3)) %>%
+  mutate(sd = median((stdev_1 -stdev_8)/stdev_8) %>% round(.,2),
+       sd.p = wilcox.test(stdev_8, stdev_1, paired=TRUE)$p.value%>% round(.,3),
+       median = median((mean_1 - mean_8)/mean_8) %>% round(.,2),
+       median.p = wilcox.test(mean_8, mean_1, paired=TRUE)$p.value%>% round(.,3),
+       min = median((min_1 - min_8)/min_8) %>% round(.,2),
+       min.p = wilcox.test(min_8, min_1, paired=TRUE)$p.value%>% round(.,3),
+       max = median((max_1 - max_8)/max_8) %>% round(.,2),
+       max.p = wilcox.test(max_8, max_1, paired=TRUE)$p.value%>% round(.,3)) %>%
   distinct(season, sd, median, min, max,sd.p, median.p, min.p, max.p)
 
+sign %>% #dplyr::select(season, sd, median, min, max) %>% 
+  View()
 
-sign %>% dplyr::select(season, sd, median, min, max) %>% View()
+#violin plots of mistake
+diff %>% distinct(id, Tunnus, season, mean_rec, stdev_1, 
+                  stdev_8, mean_1, mean_8, min_1, min_8, max_1, max_8, group) %>% 
+  group_by(id, Tunnus, season) %>%
+  mutate(stdev_1 = stdev_1/mean_rec, 
+         stdev_8 = stdev_8/mean_rec, 
+         mean_1 = mean_1/mean_rec, 
+         mean_8 = mean_8/mean_rec, 
+         min_1 = min_1/mean_rec, 
+         min_8 = min_8/mean_rec, 
+         max_1 = max_1/mean_rec, 
+         max_8 = max_8/mean_rec, 
+         sd = ((stdev_1 -stdev_8)/stdev_8) %>% round(.,3),
+         median = ((mean_1 - mean_8)/mean_8) %>% round(.,3),
+         min = ((min_1 - min_8)/min_8) %>% round(.,3),
+         max = ((max_1 - max_8)/max_8) %>% round(.,3),
+         group = ifelse(group=="-59?", "-59", group),
+         group = ifelse(group=="63?-", "63-", group),
+         group = ifelse(group=="59?-63?", "59-63", group)) %>%
+  distinct(season, group, Tunnus, sd, median, min, max) %>% #group_by(season, group) %>% 
+  # mutate(sd = median(sd),
+  #        median = median(median),
+  #        min = median(min),
+  #        max = median(max)) %>%
+  transform(season=factor(season, levels=c("Dec-Feb", "Mar-May", "Jun-Aug", "Sep-Nov"))) %>%
+  ggplot(.) + 
+  geom_violin(aes(season, max, fill=group), position="dodge",
+              trim=TRUE) + ylim(-2,2) +
+  geom_point(data = . %>% group_by(season, group) %>% 
+               mutate(sd=median(sd),
+                      median=median(median),
+                      min=median(min),
+                      max=median(max)) %>% distinct(season, group, sd, median, min, max), 
+             aes(season, max), size=3, fill="blue", shape=24)+
+  
+  geom_point(data=diff %>% 
+               distinct(id, Tunnus, season, mean_rec, stdev_1, stdev_8, mean_1, mean_8, min_1, min_8, max_1, max_8, group) %>% 
+                group_by(id, Tunnus, season) %>%
+                mutate(stdev_1 = stdev_1/mean_rec, 
+                       stdev_8 = stdev_8/mean_rec, 
+                       mean_1 = mean_1/mean_rec, 
+                       mean_8 = mean_8/mean_rec, 
+                       min_1 = min_1/mean_rec, 
+                       min_8 = min_8/mean_rec, 
+                       max_1 = max_1/mean_rec, 
+                       max_8 = max_8/mean_rec,
+                       group = ifelse(group=="-59?", "-59", group),
+                       group = ifelse(group=="63?-", "63-", group),
+                       group = ifelse(group=="59?-63?", "59-63", group)) %>% ungroup() %>% 
+                group_by(season, group) %>%
+                mutate(stdev_1 = median(stdev_1), 
+                       stdev_8 = median(stdev_8), 
+                       mean_1 = median(mean_1), 
+                       mean_8 = median(mean_8), 
+                       min_1 = median(min_1), 
+                       min_8 = median(min_8), 
+                       max_1 = median(max_1), 
+                       max_8 = median(max_8)) %>% select(-Tunnus, -id, -mean_rec) %>%
+                distinct() %>% 
+                mutate(sd = ((stdev_1 -stdev_8)/stdev_8) %>% round(.,3),
+                       median = ((mean_1 - mean_8)/mean_8) %>% round(.,3),
+                       min = ((min_1 - min_8)/min_8) %>% round(.,3),
+                       max = ((max_1 - max_8)/max_8) %>% round(.,3)) %>%
+               distinct(season, group, sd, median, min, max) %>%
+             transform(season=factor(season, levels=c("Dec-Feb", "Mar-May", "Jun-Aug", "Sep-Nov"))), 
+             aes(season, max), size=3, shape=25, colour="black", fill="red") + 
+  facet_wrap(~group, ncol=3) + theme_bw() +  
+  scale_fill_viridis_d(guides(name="Latitude"), direction=-1) 
+
 
 # linear regression ----
+# groundwater levels lm ----
 # info: http://r-statistics.co/Linear-Regression.html
-trend <- diff %>% filter(year>=1980 & year <=2010) %>%
-    distinct(Tunnus, id, date, raw_dep, year, season, mean_all) %>%
-  group_by(id, Tunnus, season, year) %>%  
-  mutate(mean=mean(raw_dep, na.rm=TRUE)) %>% distinct(id, Tunnus, year, season, mean, mean_all)
+trend.d <- diff %>% filter(year>=1980 & year <=2010)  %>%
+  ungroup() %>% mutate(season=ifelse(month > 4 & month < 11, "summer", "winter")) %>%
+    distinct(Tunnus, id, date, elevation, raw_dep, year, month, season) %>%
+  mutate(raw = elevation-raw_dep) %>% 
+  group_by(id, Tunnus, year, month) %>% # season not month
+  mutate(median=median(raw, na.rm=TRUE)) %>% #,
+         # medr = median(raw_dep, na.rm=TRUE),
+         # min = min(raw, na.rm=TRUE),
+         # max = max(raw, na.rm=TRUE)) %>% 
+  distinct(id, Tunnus, year, season, month, median)
+
+trend.d %>% left_join(., pet %>% distinct(id, N,E)) %>% 
+  mutate(group = ifelse(N > 60, "cold", "temperate")) %>% group_by(year, season, group) %>% 
+  mutate(level = median(medr)) %>% distinct(year, season, level, group) %>% 
+  ggplot(.) + geom_line(aes(year,level, colour=season)) + 
+  geom_smooth(aes(year,level, colour=season), level=0, method="lm") + 
+  facet_grid(~group) + scale_y_reverse()
 
 library(reshape2)
 library(broom)
-trend <- trend %>%
-    group_by(id, Tunnus, season, mean_all) %>% 
-    do(model=tidy(lm(mean~year, data=.)),
-       sum = summary(lm(mean~year, data=.)))
+library(Kendall)
+library(trend)
+trend <- trend.d %>%
+  group_by(id, Tunnus, year) %>%
+  summarise(median=median(median, na.rm=TRUE)) %>% 
+         # max=max(max), min=min(min),
+         # diff = max - min) %>%
+    group_by(id, Tunnus) %>% 
+    # do(model=tidy(lm(median~year, data=.)),
+    #    sum = summary(lm(median~year, data=.)))
+  do(model= tidy(MannKendall(.$median)),
+     slope = sens.slope(.$median),
+     iqrange=IQR(.$median))
+
 trend$p=0
-trend$est=0
-trend$resid=0
-trend$r.sq = 0
+trend$tau=0
+trend$sen=0
+trend$iqr=0
+# trend$r.sq = 0
 for(i in 1:length(trend$Tunnus)){
-    trend$p[i] = trend$model[[i]]$p.value[2]
-    trend$est[i] = trend$model[[i]]$estimate[2]
-    
-    trend$resid[i] = trend$sum[[i]]$sigma
-    trend$r.sq[i] = trend$sum[[i]]$r.squared
+    trend$p[i] = trend$model[[i]]$p.value[1]
+    trend$tau[i] = trend$model[[i]]$statistic[1]
+    trend$sen[i] = trend$slope[[i]]$estimates[1]
+    trend$iqr[i] = trend$iqrange[[i]]
+    # trend$resid[i] = trend$sum[[i]]$sigma
+    # trend$r.sq[i] = trend$sum[[i]]$r.squared
 }
 
-trend <- trend %>% mutate(sign=ifelse(p < 0.05, "p<0.05", "not significant"),
-                 sign=ifelse(p < 0.01, "p<0.01", sign),
-                 sign=ifelse(p < 0.001, "p<0.001", sign),
-                 trend = ifelse(est > 0, "greater", "less"))
-trend <- left_join(trend, plot)
+trend.c <- trend %>% mutate(sign=ifelse(p <= 0.05, "p<0.05", "not significant"),
+                 # sign=ifelse(p < 0.01, "p<0.01", sign),
+                 # sign=ifelse(p < 0.001, "p<0.001", sign),
+                 CRI=(sen*31)/iqr,
+                 a = ifelse(sen > 0, "higher", "lower"),
+                 trend = ifelse(CRI>1, 2, NA),
+                 trend=ifelse(CRI>0.5 & CRI <=1, 1, trend),
+                 trend=ifelse(CRI<=0.5 & CRI >0.2, .5, trend),
+                 trend=ifelse(CRI<=0.2 & CRI >=(-0.2), 0, trend),
+                 trend=ifelse(CRI<(-0.2) & CRI >=(-0.5), -.5, trend),
+                 trend=ifelse(CRI<(-0.5) & CRI >=(-1), -1, trend),
+                 trend=ifelse(CRI<(-1), -2, trend),
+                 d = paste(trend, sign, sep=", "))
+trend.c <- left_join(trend.c %>% distinct(id, Tunnus, p, tau, sen, sign, trend, d, iqr, CRI,a,
+                                          season), 
+                   met %>% ungroup() %>% na.omit() %>% distinct(id, N, E)) %>% 
+  filter(!id %in% rock$id)
+ggmap(stamen, darken = c(0.6, "white")) + 
+    geom_point(data=trend.c %>%
+                 mutate(trend = ifelse(p<=0.05, NA, CRI)),
+                 # transform(season=factor(season, levels=c("winter", "summer"))),
+                 # transform(month=factor(month, levels=c(12,1,2,3,4,5,6,7,8,9,10,11))),
+                 aes(E, N, fill = CRI, colour= trend, shape=a), size=2,
+               position=position_jitter(h=0.2,w=0.3)) +
+  # scale_colour_manual("significance", values=c("lower"="orange", "higher" = "steelblue",
+  #                                            "no trend" = "lightgrey",
+  #                                       "no trend, p<0.05" = "black",
+  #                                       "no trend, not significant" = "lightgrey",
+  #                                          "not significant" = "lightgrey", "p<0.05" = "black",
+  #                                          "lower, p<0.05" = "black",
+  #                                          "lower, not significant" = "orange",
+  #                                          "higher, p<0.05" = "black",
+  #                                          "higher, not significant" = "steelblue"),
+  #                     guide=FALSE) +
+  scale_colour_gradient2("CRI", low="orange", mid = "lightgrey", high="steelblue",
+                         limits=c(min(trend.c$CRI),max(1, max(trend.c$CRI))), na.value="black",
+                         breaks=c(-2,-1, 0, 1,2),
+                         guide=FALSE) +
+  # scale_fill_manual("trend", values=c("lower" = "orange", "higher" = "steelblue",
+  #                                        "no trend" = "lightgrey")) +
+  scale_fill_gradient2("CRI", low="orange", mid = "lightgrey", high="steelblue",
+                       limits=c(min(trend.c$CRI),max(1, max(trend.c$CRI))),
+                       breaks=c(-2,-1, 0, 1,2)) +
+  # scale_alpha_manual("significance", values=c("not significant" = .7, "p<0.05" = .9),
+  #                    guide=FALSE)+
+  scale_shape_manual("", values=c("lower"= 25, "higher" = 24, "no trend" = 21)) +
+  theme_bw() +ylab("") + xlab("")
+  # scale_size_continuous(limits = c(0, 1), breaks=c(.2,.5,.8), range(.1, 1)) +
+    # facet_wrap(~season)
+ggsave("level spat trends.tiff", width = 14, height = 14.6, units = "cm", dpi=300)
+
+# met lm ----
+met <- tibm %>% distinct(date, id, Tunnus, RRday, Tday, OSQ, Q, E, N) %>% group_by(id) %>% 
+  mutate(year = year(date), month = month(date),
+         season = ifelse(month == 9 | month == 11 | month == 10, "Sep-Nov", NA),
+         season = ifelse(month == 1 | month == 2 | 
+                           month == 12, "Dec-Feb", season),
+         season = ifelse(month == 4 | month == 5 | 
+                           month == 3, "Mar-May", season),
+         season = ifelse(month == 7 | month == 8 | 
+                           month == 6, "Jun-Aug", season)) %>%
+  distinct(id, Tunnus, date, RRday, Tday, OSQ, Q, year, season, month) %>% 
+  left_join(., pet %>% ungroup %>% distinct(id, N, E, ymd, pet) %>% rename(date=ymd)) %>%
+  mutate(ORQ = Q - OSQ) %>% filter(year(date) >= 1980)
+
+# for snowmelt and rain trends
+met <- met %>%
+  group_by(id, year, season, month) %>%
+  mutate(sump=sum(RRday), meant = mean(Tday), sumq = sum(Q), sumosq=sum(OSQ),
+         sumorq= sum(ORQ)) %>%
+  distinct(id, Tunnus, N, E, year, season, month, sump, meant, sumq, sumosq, sumorq, pet) %>%
+  filter(year >=1980 & year <= 2010)
+
+#attempt to similate ground frost
+# met <- met %>% group_by(id, year, season, n=Tday <= 0) %>% 
+#   mutate(frostdays=ifelse(Tday <= 0, row_number(), 0L),
+#          nofrostdays=ifelse(Tday > 0, row_number(), 0L),
+#          concrain = ifelse(ORQ > 0, 1, 0)) %>% 
+#   ungroup() %>% group_by(id, year, season)  %>%
+#   mutate(frost = max(frostdays),
+#          nofrost = max(nofrostdays)) %>%  select(-n, -frostdays, -nofrostdays) %>% 
+#   distinct(id, Tunnus, N, E, year, season, month, frost, nofrost)
+
+
+# met <- met %>% filter(id %in% trend$id)
+# met %>% 
+#   mutate(group = ifelse(N < 59, "-59⸰ N", NA),
+#          group = ifelse(N >= 59, "59⸰-63⸰ N", group),
+#          group = ifelse(N > 63, "63⸰ N-", group)) %>% group_by(group, month) %>% 
+#   mutate(meanp = mean(sump), meant = mean(meant)) %>% distinct(group, month, meanp, meant) %>% View
+
+
+library(reshape2)
+library(broom)
+temp <- met %>%
+  group_by(id, year, season, month) %>% #or season + month, do sumq-pet 
+  mutate(sumpet=sum(pet), sumq = sum(sumq), sump = sum(sump),
+         q_pet = sumq - sumpet) %>% distinct(id, N, E, year, season, month, 
+                                                              sumq, sumpet, q_pet, frost, nofrost) %>%
+  distinct(id, N, E, year, season, month, sumq) %>%
+  ungroup() %>% group_by(id, N, E, season, month) %>%
+  do(model=tidy(lm(sumq~year, data=.)),
+     sum = summary(lm(sumq~year, data=.)))
+temp$p=0
+temp$est=0
+temp$resid=0
+temp$r.sq = 0
+for(i in 1:length(temp$id)){
+  temp$p[i] = temp$model[[i]]$p.value[2]
+  temp$est[i] = temp$model[[i]]$estimate[2]
+  
+  temp$resid[i] = temp$sum[[i]]$sigma
+  temp$r.sq[i] = temp$sum[[i]]$r.squared
+}
+temp <- temp %>% mutate(sign=ifelse(p <= 0.05, "p<0.05", "not significant"),
+                        trend = ifelse(est > 0, "wetter", "drier"),
+                        trend = ifelse(est == 0, "no trend", trend)) %>% 
+  distinct(id, N, E, season, month, p, est, r.sq, sign, trend) %>% 
+  na.omit(.)
+
+label = "rain and melt"
 ggmap(stamen) + 
-    geom_point(data=trend, 
-               aes(E, N, colour = trend, shape = sign, alpha=r.sq), size=2) + 
-    scale_colour_manual(values=c("greater"="red", "less" = "blue")) + 
-    facet_wrap(~season)
+  geom_point(data=temp %>%
+               # transform(season=factor(season, levels=c("Dec-Feb", "Mar-May", "Jun-Aug",
+               #                                          "Sep-Nov")))%>%
+               transform(month=factor(month, levels=c(12,1,2,3,4,5,6,7,8,9,10,11))),
+             aes(E, N, fill = trend, colour=sign, alpha=sign), size=2,  shape = 22) + 
+  # scale_colour_viridis_c(direction = -1, breaks=c(-4,0,4), option="cividis") +
+  scale_colour_manual("linear trend", values=c("drier"="orange", "wetter" = "steelblue",
+                                      "no trend" = "lightgrey",
+                      "not significant" = "lightgrey","p<0.05" = "black")) +
+  # scale_fill_viridis_c(direction = -1, breaks=c(-4,0,4), option="cividis") +
+  scale_fill_manual(name=label, values=c("drier" = "orange", "wetter" = "steelblue",
+                                    "no trend" = "lightgrey")) +
+  scale_alpha_manual("linear trend", values=c("not significant" = .3,"p<0.05" = 1),
+                     na.translate = TRUE, na.value = NA) +
+  facet_wrap(~month, ncol=3)
+
+# time series analysis for lm ----
+# met from 'met lm'
+# ts.min <- readRDS("output/process/swe_met.rds") %>% distinct(date, id, E, N, Tmin, Tm) %>%
+#   mutate(id = paste("s_", id, sep="")) %>% full_join(.,
+#   readRDS("output/process/Tmindf.rds") %>% mutate(id=paste("f_", id, sep="")) %>% 
+#     filter(id %in% tibm$id) %>% left_join(., plot %>% distinct(id, E, N), by="id") %>% 
+#     unnest() %>% rename(Tmin = value) %>% select(-lat,-lon)) %>% 
+#   filter(year(date) >= 1980)
+#   # filter(paste("s_",id,sep="") %in% tibm$id) %>%
+# ts <- ts.min %>% group_by(id) %>% 
+#   mutate(year = year(date), month = month(date),
+#          season = ifelse(month == 9 | month == 11 | month == 10, "Sep-Nov", NA),
+#          season = ifelse(month == 1 | month == 2 | 
+#                            month == 12, "Dec-Feb", season),
+#          season = ifelse(month == 4 | month == 5 | 
+#                            month == 3, "Mar-May", season),
+#          season = ifelse(month == 7 | month == 8 | 
+#                            month == 6, "Jun-Aug", season)) %>%
+#   distinct(id, Tunnus, date, Tmin, Tm, year, season, month, N, E) %>%
+ts <-  met %>%
+  # group_by(id, year, season, n=Tday <= 0) %>%
+  # mutate(frostdays=ifelse(Tday <= 0, row_number(), 0L),
+  #        nofrostdays=ifelse(Tday > 0, row_number(), 0L),
+  #        concrain = ifelse(ORQ > 0, 1, 0)) %>%
+  # ungroup() %>% group_by(id, year, season)  %>%
+  # mutate(frost = max(frostdays),
+  #        nofrost = max(nofrostdays)) %>% ungroup() %>%
+  group_by(year, season, id) %>%
+  mutate(meant = median(Tday), mint = min(Tday), maxt = max(Tday)) %>%
+  # rename(meant = Tm, mint = Tmin) %>%
+  group_by(year, season) %>%
+  mutate(meant = median(meant), mint = median(mint), maxt=median(maxt)) %>%
+  # select(-n, -frostdays, -nofrostdays) %>% 
+  distinct()
+  # group_by(id, year, season, n, daysOS=OSQ>0, daysOR=ORQ>0) %>% 
+  # mutate(sumOR=sum(ORQ), sumOS = sum(OSQ), sumQ = sum(Q))
+
+comb <- urc2.df %>% unnest() %>% filter(!is.na(temp) & 
+                                          lon >= min(met$E, na.rm=TRUE) & 
+                                          lon <= max(met$E, na.rm=TRUE) &
+                                          lat >= min(met$N, na.rm=TRUE)) %>%
+  mutate(year=year(date), month=month(date),
+         group = ifelse(lat > 60, "cold", "temperate"),
+         season = ifelse(month == 9 | month == 11 | month == 10, "SON", NA),
+         season = ifelse(month == 1 | month == 2 | 
+                           month == 12, "DJF", season),
+         season = ifelse(month == 4 | month == 5 | 
+                           month == 3, "MAM", season),
+         season = ifelse(month == 7 | month == 8 | 
+                           month == 6, "JJA", season)) %>%
+  transform(group = factor(group, levels=c("cold", 
+                                           "temperate")),
+            season = factor(season, levels=c("DJF", "MAM", "JJA", "SON"))) %>% 
+  group_by(year, season, group) %>% 
+  mutate(meant=median(temp), sump = mean(prec)/days_in_month(date)) %>% 
+  distinct(lon ,lat, year, season, group, meant, sump)
+
+
+#### met from 'met lm' ###
+met %>% ungroup() %>% filter(!is.na(N)) %>%
+  mutate(group = ifelse(N > 60, "cold", "temperate"),
+              season = ifelse(month == 9 | month == 11 | month == 10, "SON", NA),
+              season = ifelse(month == 1 | month == 2 | 
+                                month == 12, "DJF", season),
+              season = ifelse(month == 4 | month == 5 | 
+                                month == 3, "MAM", season),
+              season = ifelse(month == 7 | month == 8 | 
+                                month == 6, "JJA", season),
+         country = ifelse(str_detect(id, "f"), "fi", "swe")) %>% 
+         group_by(year, season, group, country) %>% 
+  mutate(meant=median(Tday), sump=mean(RRday)) %>% 
+  distinct(year, season, group, meant, sump, country) %>% 
+  transform(group = factor(group, levels=c("cold", 
+                                           "temperate")),
+            season = factor(season, levels=c("DJF", "MAM", "JJA", "SON"))) %>% 
+  # distinct(year, season, group, meant, mint, maxt) %>% 
+  ggplot(.) + 
+  geom_rect(data=. %>% filter(country=="swe"),
+            aes(xmin=1980, xmax=2010, ymin=-Inf, ymax=Inf), colour="lightgrey", alpha=.01) +
+  geom_line(data=comb, aes(year, meant, colour= "URC TS 4.04",
+                           linetype="T"), size=.5) + 
+  geom_line(data=. %>% filter(country=="swe"),
+            aes(year, meant, colour= "CCCS",
+                linetype="T"), size=.5) +
+  geom_line(data=. %>% filter(country=="fi"),
+            aes(year, meant, colour= "FMI ClimGrid",
+                linetype="T"), size=.5) +
+  geom_smooth(data=comb, aes(year, meant, colour="URC TS 4.04", linetype="linear trend"), 
+              method="lm", level=0, size=.5)+
+  geom_smooth(data=. %>% filter(country=="swe"),
+              aes(year, meant, colour="CCCS", linetype="linear trend"), 
+              method="lm", level=0, size=.5)+
+  geom_smooth(data=. %>% filter(country=="fi"),
+              aes(year, meant, colour="FMI ClimGrid", linetype="linear trend"), 
+              method="lm", level=0, size=.5)+
+  scale_colour_manual(values=c("URC TS 4.04"="#0D0887FF",
+                               "FMI ClimGrid" ="#FCA636FF",
+                               "CCCS"="#B12A90FF")) +
+  guides(lty = guide_legend(override.aes = list(col = 'black'))) + ylab("°C") +
+  facet_grid(~season~group, scale="free") + theme_bw() +
+  geom_text(data = data.frame(label = c("a", "b", "c", "d", "e", "f", "g", "h"),
+    group = c("cold", "cold", "cold", "cold", 
+            "temperate", "temperate", "temperate", "temperate"),
+    season = c("DJF", "MAM", "JJA", "SON","DJF", "MAM", "JJA", "SON")),
+    mapping = aes(x = -Inf, y = Inf, label = label), hjust = -1, vjust  = 1.2)
+# ggsave("prec trends.tiff", width = 17, height = 10.81, units = "cm", dpi=600)
+ggsave("temp trends.tiff", width = 17, height = 10.81, units = "cm", dpi=600)
+dev.off()
+
+
+
+# Mann-Kendall trends ----
+urc.df <- readRDS("output/process/urcdf.rds")
+library(Kendall)
+
+#prep/test data
+test <- urc.df %>% unnest() %>% 
+  mutate(year = year(date),
+         month = month(date)) %>% 
+  filter(year >1979 & year <=2010) %>%
+  mutate(group  = ifelse(lat > 60, "cold", "temperate"),
+         season = ifelse(month > 4 & month < 11, "summer", "winter"),
+         pet = pet * days_in_month(date)) #%>% 
+  group_by(lon, lat, year) %>% 
+  mutate(sum_frs_y = sum(frs),
+         med_temp_y = median(temp),
+         sum_prec_y = sum(prec),
+         sum_pet_y = sum(pet),
+         sum_wet_y = sum(wet)) %>%
+  group_by(lon, lat, year, month) %>%
+  mutate(sum_prec_s = sum(prec),
+         sum_pet_s = sum(pet),
+         sum_wet_s = sum(wet),
+         sum_frs_s=sum(frs)) %>% distinct(lon, lat, group, year, month, season, sum_prec_y, med_temp_y,
+                                          sum_pet_y,sum_frs_y,sum_wet_y, sum_frs_s,
+                                          sum_prec_s, sum_pet_s,sum_wet_s)
+
+ggmap(stamen) + geom_tile(data=test %>% ungroup() %>% distinct(lon, lat, cz) %>% 
+                            filter(!is.na(cz)), aes(lon, lat, fill=cz), alpha=.5) + 
+  scale_fill_viridis_d()
+
+ggmap(stamen, darken = c(0.6, "white")) + 
+  geom_tile(data=test %>% ungroup() %>% distinct (lon, lat, month, frs) %>% 
+              group_by(lon, lat, month) %>%
+              # transform(season=factor(season, levels=c("winter", "summer"))) %>% 
+              mutate(med_frs=median(frs)/days_in_month(as.Date(paste("2000", 
+                                                                     as.character(month),"01",
+                                                                     sep="-")))*30) %>% 
+              distinct(lon, lat, month, med_frs) %>% ungroup() %>%
+              mutate(month = month.abb[month],
+                     month=factor(month, levels=c("Jan", "Feb", "Mar", "Apr",
+                                                  "May", "Jun", "Jul", "Aug",
+                                                  "Sep", "Oct", "Nov", "Dec"))), 
+            aes(lon, lat, fill=med_frs), colour=NA, alpha=.75) +
+  # geom_point(data=test %>% ungroup() %>% distinct (lon, lat, month, 
+  #                                                  frs) %>% 
+  #              group_by(lon, lat, month) %>%
+  #              # transform(season=factor(season, levels=c("winter", "summer"))) %>% 
+  #              mutate(sd_frs = sd(frs)) %>% 
+  #              distinct(lon, lat, month, med_frs, sd_frs), 
+  #           aes(lon, lat, colour=sd_frs), size=1) +
+  scale_fill_viridis_c("days", direction = -1, na.value = "white") + 
+  scale_colour_viridis_c("days",option="plasma", na.value = NA) + 
+  scale_x_continuous("", breaks=c(10,20,30), minor_breaks = c(15, 25),
+                     labels = c(10,20,30)) + 
+  ylab("") +
+  facet_wrap(~month, ncol=3) + theme_bw() + geom_hline(aes(yintercept=60), colour="red")
+ggsave("frost days.tiff", width = 87.6, height = 150, units = "mm", dpi=600)
+
+# find cells nearest the smaller gridcells
+library(sp); library(rgeos)
+sp.urc <- SpatialPoints(urc.df[ , c(1, 2)], proj4string=CRS("+proj=longlat + datum=WGS84"))
+sp.reg <- SpatialPoints((pet %>% ungroup() %>% distinct(id, N, E))[ , c(3, 2)], 
+                        proj4string=CRS("+proj=longlat + datum=WGS84"))
+
+ids <- apply(gDistance(sp.urc, sp.reg, byid=TRUE), 1, which.min)
+urc2.df <- urc.df %>% dplyr::filter(id %in% ids)
+pet <- pet %>% ungroup() %>% distinct(id, N, E)
+pet$n <- ids
+join.df <- pet %>% ungroup() %>% distinct(id, n, E,N)
+join.df <- urc2.df %>% rename(n = id) %>% full_join(., join.df)
+
+#do trend analyses on met data
+join.df <- join.df %>% left_join(., tibm %>% distinct(id, date, RRday, Q, OSQ) %>% 
+                                   group_by(id) %>% nest(.key="daily"))
+
+join.unnest <- join.df %>% unnest("monthly") %>% select(-temp,frs,-daily) %>% 
+  filter(year(date) >=1980) 
+join.unnest <- join.unnest %>% group_by(lon, lat, id, n, E, N) %>% 
+  complete(date = seq.Date(as.Date("1980-01-01"), max(date), by="day")) %>% 
+  group_by(month(date), lon, lat, id, n) %>% mutate(pet = pet[!is.na(pet)][1L]) %>% 
+  ungroup() %>% select(-'month(date)')
+join.unnest2 <- join.df %>% unnest("daily") %>% select(-monthly) 
+join.unnest <- left_join(join.unnest, join.unnest2)
+join.unnest <- join.unnest %>% group_by(lon, lat, id, n, E, N, date) %>% 
+  mutate(q_pet = Q - pet, q_pet = ifelse(q_pet <0, 0, q_pet),
+         p_pet = RRday - pet, p_et = ifelse(p_pet <0, 0, p_pet),
+         month = month(date), year=year(date),
+         group = ifelse(lat > 60, "snow dominated", "transition zone"),
+         group = ifelse(lat <= 58, "temperate", group),
+         rs  = ifelse(lat > 60 & month > 4 & month < 11, "MJJASO", NA),
+         rs  = ifelse(lat <= 60 & lat >58 & month > 2 & month < 12,
+                          "MAMJJASON", rs),
+         rs  = ifelse(lat <= 58, "no frs", rs),
+         season = ifelse(month == 9 | month == 11 | month == 10, "SON", NA),
+         season = ifelse(month == 1 | month == 2 | 
+                           month == 12, "DJF", season),
+         season = ifelse(month == 4 | month == 5 | 
+                           month == 3, "MAM", season),
+         season = ifelse(month == 7 | month == 8 | 
+                           month == 6, "JJA", season)) %>%
+  filter(year <= 2010) %>% ungroup() %>% group_by(lon, lat, id, n, E, N)
+saveRDS(join.unnest, "output/process/join_unnest.RDS")
+
+join.unnest <- readRDS("output/process/join_unnest.RDS")
+join.unnest2 <- join.unnest %>% #filter(!is.na(rs)) %>% 
+  # mutate(season=ifelse(month > 4 & month < 11, "summer", "winter")) %>% 
+  mutate(rs = ifelse(lat >60 & month >4 & month < 11, "no frs", "frs"),
+         rs = ifelse(lat <60 & month >3 & month < 12, "no frs", rs)) %>%
+  group_by(lon, lat, id, n, E, N, year, rs) %>%
+  mutate(qpet_rs=sum(q_pet), wet_rs=sum(wet, na.rm=TRUE),
+            frs_rs = sum(frs, na.rm=TRUE), ppet_rs = sum(p_pet)) %>% 
+  group_by(lon, lat, id, n, E, N, year) %>%
+  mutate(qpet_yr=sum(q_pet), wet_yr=sum(wet, na.rm=TRUE),
+            frs_yr = sum(frs, na.rm=TRUE), ppet_yr = sum(p_pet)) %>% 
+  select(-date,-prec,-pet,-frs,-wet,-RRday,-Q,-OSQ,-q_pet,-p_pet,-p_et,-month,-season,-group) %>%
+  distinct()
+
+
+join.unnest %>% #filter(!is.na(rs)) %>% 
+  ungroup() %>%
+  mutate(group  = ifelse(lat > 60, "cold", NA),
+         group  = ifelse(lat <= 60, "temperate", group)#,
+         # season = ifelse(month > 4 & month < 11, "summer", "winter")
+         ) %>%
+  transform(group = factor(group, levels=c("cold", 
+                                           "temperate")),
+            season = factor(season, levels=c("DJF", "MAM", "JJA", "SON"))) %>%
+  group_by(lon, lat, group, year, season) %>% 
+  summarise(sum_qpet = sum(q_pet), sum_wet = sum(wet, na.rm=TRUE)) %>% 
+  group_by(year, group, season) %>%
+  summarise(q_pet = median(sum_qpet), wet = median(sum_wet)#,
+            # frs = median(sum_frs)
+            ) %>%
+  ggplot(.) + 
+  geom_line(aes(year, wet, linetype="yearly sum", colour="wet days", group=group),
+            size=0.5) +
+  # geom_line(aes(year, frs, colour="frost days", group=group)) +
+  geom_line(aes(year, q_pet/4, linetype="yearly sum", colour="R+M-PET", group=group),
+            size=0.5) + 
+  # geom_line(aes(year, frs, colour="frost days", group=group)) + 
+  geom_smooth(aes(year, wet, linetype="trend", colour="wet days", group=group), 
+              method="lm", level=0,
+              size=0.5) +
+  # geom_smooth(aes(year, frs, colour="frost days", group=group), method="lm", level=0) +
+  geom_smooth(aes(year, q_pet/4, linetype="trend", colour="R+M-PET", group=group), 
+              method="lm", level=0,
+              size=0.5) +
+  # geom_smooth(aes(year, frs, colour="frost days", group=group), method="lm", level=0) +
+  scale_y_continuous(name= "days", sec.axis=sec_axis(trans=~.*4, name="mm")) +
+  scale_linetype("linetype") + 
+  scale_colour_manual("colour", values=c("R+M-PET" = "#FCA636FF", "wet days" = "#B12A90FF")) +
+  guides(lty = guide_legend(override.aes = list(col = 'black'), order=1),
+         colour = guide_legend(order = 2)) +
+  facet_grid(~season~group, scales = "free") + theme_bw() +
+  geom_text(data = data.frame(label = c("a", "b", "c", "d", "e", "f", "g", "h"),
+                              group = c("cold", "cold", "cold", "cold", 
+                                        "temperate", "temperate", "temperate", "temperate"),
+                              season = c("DJF", "MAM", "JJA", "SON","DJF", "MAM", "JJA", "SON")),
+            mapping = aes(x = -Inf, y = Inf, label = label), hjust = -1, vjust  = 1.2)
+ggsave("rmpet and wet trends.tiff", width = 17, height = 10.81, units = "cm", dpi=600)
+
+
+
+join.unnest2 %>% ggplot(.) + geom_point(aes(sum_wet, sum_q_pet, 
+                                            colour=sum_frs, group=n), alpha=.5) +
+  scale_colour_viridis_c(direction=-1) + scale_y_continuous(trans="log10") + 
+  scale_x_continuous(trans="log10")
+
+
+# join.unnest2 <- join.unnest %>% #filter(!is.na(rs)) %>% 
+#   mutate(season=ifelse(month > 4 & month < 11, "summer", "winter"),
+#          group  = ifelse(lat > 60, "cold", "temperate")) %>% 
+#   transform(group = factor(group, levels=c("cold", 
+#                                            "temperate")),
+#             season = factor(season, levels=c("winter", "summer"))) %>%
+#   group_by(lon, lat, id, n, E, N, year, group, season) %>%
+#   summarise(sum_q_pet=sum(q_pet), sum_wet=sum(wet, na.rm=TRUE),
+#             sum_frs = sum(frs, na.rm=TRUE), sum_p_pet = sum(p_pet))
+library(broom); library(Kendall); library(trend)
+join.trend.qr <- join.unnest2 %>% 
+  mutate(scale="frost-free", type="R+M-PET") %>%
+  group_by(lon, lat, id, n, E, N, rs, scale, type) %>% 
+  do(model= tidy(MannKendall(.$qpet_rs)),
+     slope = sens.slope(.$qpet_rs)) %>% 
+  filter(rs != "frs") %>% ungroup() 
+join.trend.wr <- join.unnest2 %>% 
+  mutate(scale="frost-free", type="wet days") %>%
+  group_by(lon, lat, id, n, E, N, rs, scale, type) %>% 
+  do(model= tidy(MannKendall(.$wet_rs)),
+     slope = sens.slope(.$wet_rs)) %>% 
+  filter(rs != "frs") %>% ungroup()
+join.trend.qy <- join.unnest2 %>% filter(rs!="frs") %>% 
+  mutate(scale="all months", type="R+M-PET") %>%
+  group_by(lon, lat, id, n, E, N, scale, type) %>% 
+  do(model= tidy(MannKendall(.$qpet_yr)),
+           slope = sens.slope(.$qpet_yr)) %>% ungroup()
+join.trend.wy <- join.unnest2 %>% filter(rs!="frs") %>% 
+  mutate(scale="all months", type="wet days") %>%
+  group_by(lon, lat, id, n, E, N, scale, type) %>% 
+  do(model= tidy(MannKendall(.$wet_yr)),
+     slope = sens.slope(.$wet_yr)) %>% ungroup()
+join.trend.qr$p = NA
+join.trend.wr$p = NA
+join.trend.qy$p = NA
+join.trend.wy$p = NA
+join.trend.qr$tau = NA
+join.trend.wr$tau = NA
+join.trend.qy$tau = NA
+join.trend.wy$tau = NA
+join.trend.qr$sen = NA
+join.trend.wr$sen = NA
+join.trend.qy$sen = NA
+join.trend.wy$sen = NA
+for(i in 1:length(join.trend.qr$id)){
+  join.trend.qr$p[i] = join.trend.qr$model[[i]]$p.value[1]
+  join.trend.qr$tau[i] = join.trend.qr$model[[i]]$statistic[1]
+  join.trend.qr$sen[i] = join.trend.qr$slope[[i]]$estimates[1]
+  
+  join.trend.wr$p[i] = join.trend.wr$model[[i]]$p.value[1]
+  join.trend.wr$tau[i] = join.trend.wr$model[[i]]$statistic[1]
+  join.trend.wr$sen[i] = join.trend.wr$slope[[i]]$estimates[1]
+  
+  join.trend.qy$p[i] = join.trend.qy$model[[i]]$p.value[1]
+  join.trend.qy$tau[i] = join.trend.qy$model[[i]]$statistic[1]
+  join.trend.qy$sen[i] = join.trend.qy$slope[[i]]$estimates[1]
+  
+  join.trend.wy$p[i] = join.trend.wy$model[[i]]$p.value[1]
+  join.trend.wy$tau[i] = join.trend.wy$model[[i]]$statistic[1]
+  join.trend.wy$sen[i] = join.trend.wy$slope[[i]]$estimates[1]
+}
+
+
+join.trend <- join.trend.qr %>% select(-model,-slope) %>% 
+  full_join(., join.trend.wr %>% select(-model,-slope)) %>% 
+  full_join(., join.trend.qy %>% select(-model,-slope))%>% 
+  full_join(., join.trend.wy %>% select(-model,-slope)) %>% 
+  group_by(lon, lat, id, n, E, N, scale, type) %>%
+  mutate(sign=ifelse(p <= 0.05, "p<0.05", "not significant"),
+                        trend = ifelse(sen > 0, "wetter", "drier"),
+                        trend = ifelse(sen < 0.01 & sen > -0.01, "no trend", trend)) %>% 
+  distinct(lon, lat, n, id, N, E, scale, type, p, tau, sen, sign, trend) %>% 
+  na.omit(.)
+
+b <- ggmap(stamen, darken = c(0.6, "white")) + 
+  geom_tile(data=join.trend %>% filter(type=="wet days"), 
+            aes(lon, lat, fill=sen)) +
+  geom_tile(data=join.trend %>% filter(type=="wet days") %>% 
+              mutate(trend=ifelse(p<=0.05, "sign", NA)),
+            aes(lon, lat, colour=trend), fill=NA)+
+  scale_colour_manual(values=c("sign"="black"), na.value=NA) +
+  scale_fill_gradient2("trend days/yr", high="steelblue", mid = "white", low="orange", 
+                       # breaks=c(-4,-2,0,2,4), limits=c(-4.5,5)) +
+                        breaks=c(-1,-.5,0,.5,1), limits=c(-1.2,1.2)) +
+  facet_grid(type~scale) + theme_bw() + guides(color = FALSE) +
+  geom_text(data = data.frame(label = c("c", "d"),
+                              type = c("wet days", "wet days"),
+                              # type = c("R+M-PET", "R+M-PET"),
+                              scale = c("all months", "frost-free")),
+            mapping = aes(x = -Inf, y = Inf, label = label),  hjust = -1, vjust  = 1.2) +
+  ylab("") + xlab("")
+library(cowplot)
+plot_grid(a + theme(axis.title.x = element_blank(),
+                    axis.text.x = element_blank(),
+                    axis.title.y = element_blank()),
+          b + theme(axis.title.y = element_blank()), 
+          align="hv", ncol=1)
+ggsave("met spat trends.tiff", width = 12.45, height = 15, units = "cm", dpi=300)
 
 
 # count wells, clusters ----

@@ -14,7 +14,7 @@ lsT <- list.files(path  = "R_finland_drought/input/daily_mean_temperature_FI_net
 lsTmax <- list.files(path  = 
                        "R_finland_drought/input/daily_maximum_temperature_FI_netcdf", full.names = TRUE)
 lsTmin <- list.files(path  = 
-                       "R_finland_drought/input/daily_minimum_temperature_FI_netcdf", full.names = TRUE)
+                       "input/daily_minimum_temperature_FI_netcdf", full.names = TRUE)
 
 
 
@@ -30,7 +30,7 @@ ncP2df <- function(lsPnc, en) {
     dimnames(data) <- list(paste(lon, lat, sep="_"), as.character(dates))
       
       
-  data.df <-data %>% 
+  data.df <- data %>% 
       as.data.frame %>%
       rownames_to_column(var = "lonlat") %>% 
       as.tibble %>% 
@@ -68,10 +68,10 @@ tmin.df <- lapply(X = lsTmin, FUN = ncP2df, en="Tmin") %>%
   bind_rows %>% 
   # rename(Tday = value) %>%
   group_by(lon, lat) %>% 
-  nest(.key = "daily") %>% 
+  nest(.key = "daily") %>% ungroup() %>% 
   mutate(id = 1:n())
 
-write_rds(tmax.df, "R_finland_drought/output/process/Tmaxdf.rds")
+write_rds(tmin.df, "output/process/Tmindf.rds")
 
 library(tiff)
 lsGRad <- list.files(path  = "input/GlobalRad_10km_1961_2014_geotif", full.names = TRUE, pattern = "*.tif$")
@@ -80,25 +80,104 @@ grad.df <- as.data.frame(rasterToPoints(raster(lsGRad)))
 
 
 
+# download CRU data ----------------------------------------------------------
+#http://data.ceda.ac.uk/badc/cru/data/cru_ts/cru_ts_4.04/data/frs
+# frost, PET, P and meanT
+
+lsfrs <- list.files(path="Q:/Data/URC monthly TS 1901-2019/frs_1960-2019/",
+                 full.names = TRUE, pattern="*.nc")
+lsT <- list.files(path="Q:/Data/URC monthly TS 1901-2019/temp_1960-2019/",
+                    full.names = TRUE, pattern="*.nc")
+lsP <- list.files(path="Q:/Data/URC monthly TS 1901-2019/prec_1960-2019/",
+                    full.names = TRUE, pattern="*.nc")
+lspet <- list.files(path="Q:/Data/URC monthly TS 1901-2019/pet_1960-2019/",
+                    full.names = TRUE, pattern="*.nc")
+lswet <- list.files(path="Q:/Data/URC monthly TS 1901-2019/wet_days_1960-2019/",
+                    full.names = TRUE, pattern="*.nc")
+ncfun <- function(lsnc, en){
+  bom <- nc_open(lsnc)    
+  # print(bom) # Inspect the data
+  # Extract data
+  lon <- ncvar_get(bom, "lon")
+  lat <- ncvar_get(bom, "lat")
+  dates <- as.Date("1900-01-01") + ncvar_get(bom, "time")
+  data <- ncvar_get(bom, varid=en)
+  # dimnames(data) <- list(paste(lon, lat, sep="_"), as.character(dates))
+  dimnames(data) <- list(lon, lat)
+  nc_close(bom)
+  
+  data.df <- data %>% 
+    as.data.frame %>%
+    rownames_to_column(var="lon") %>%
+    pivot_longer(cols = c(2:length(colnames(.))), names_to = "lat") %>% 
+    mutate(date=dates) %>%
+    as_tibble() %>% 
+    mutate(date = as.Date(date)) %>%
+    mutate_at(vars(lon:lat), as.numeric) 
+  
+  return(data.df)
+}
+
+frs.df <- lapply(X = lsfrs, FUN = ncfun, en="frs") %>% 
+  bind_rows %>% 
+  group_by(lon, lat) %>% 
+  nest(.key = "monthly") 
+saveRDS(frs.df, "output/process/frs.df.rds")
+p.df <- lapply(X = lsP, FUN = ncfun, en="pre") %>% 
+  bind_rows %>% 
+  group_by(lon, lat) %>% 
+  nest(.key = "monthly")
+t.df <- lapply(X = lsT, FUN = ncfun, en="tmp") %>% 
+  bind_rows %>% 
+  group_by(lon, lat) %>% 
+  nest(.key = "monthly")
+pet.df <- lapply(X = lspet, FUN = ncfun, en="pet") %>% 
+  bind_rows %>% 
+  group_by(lon, lat) %>% 
+  nest(.key = "monthly")
+wet.df <- lapply(X = lswet, FUN = ncfun, en="wet") %>% 
+  bind_rows %>% 
+  group_by(lon, lat) %>% 
+  nest(.key = "monthly")
+
+urc.df <- p.df %>% unnest() %>% rename(prec = value) %>% 
+  left_join(., t.df %>% unnest() %>% rename(temp = value)) %>% 
+  left_join(., pet.df %>% unnest() %>% rename(pet = value)) %>% 
+  left_join(., frs.df %>% unnest() %>% rename(frs = value)) %>%
+  left_join(., wet.df %>% unnest() %>% rename(wet=value)) %>% 
+  group_by(lon, lat) %>% nest(.key="monthly")
+urc.df$id <- 1:length(row.names(urc.df))
+saveRDS(urc.df, "output/process/urcdf.rds")
+
+#check data on map
+urc.df <- readRDS("output/process/urcdf.rds")
+ok <- urc.df %>% unnest() %>% group_by(lon, lat) %>% mutate(year=year(date)) %>%
+  group_by(lon, lat, year) %>% mutate(pet=sum(pet)) %>% 
+  ungroup() %>% group_by(lon, lat) %>% 
+  summarise(med_pet=median(pet))
+ggmap(stamen) + geom_tile(data=ok, aes(lon,lat, fill=med_pet), alpha = .7) + 
+  scale_fill_viridis_c(na.value="grey50")
+
+
 
 # plot for random day ---------------------------------------------------------
     
-p.df <- readRDS("R_finland_drought/output/process/Pdf.rds")
+Tmin.df <- readRDS("output/process/Tmindf.rds")
 d <- "1961-10-10"
-p.df %>% dplyr::filter(id == 50) %>% unnest() %>% ggplot(.)  + 
+Tmin.df %>% dplyr::filter(id == 50) %>% unnest() %>% ggplot(.)  + 
   geom_line(aes(date, value))
 
 # get SMHI data ---------------------------------------------------------------
 
-# from Tinghai
-lsDat <- list.files(path = "data/raw/tinghai/Daily/", full.names = TRUE)
-lsDatna <- list.files(path = "data/raw/tinghai/Daily/") %>% 
+# from luftweb/Tinghai
+lsDat <- list.files(path = "input/sgi_met/14/", full.names = TRUE) #"data/raw/tinghai/Daily/"
+lsDatna <- list.files(path = "input/sgi_met/14/") %>% 
   gsub('[[:alpha:]]', '', .) %>%
-  gsub('[[:punct:]]', '', .) %>% as.numeric() %>% 
+  gsub('([_])|[[:punct:]]', '\\1', .) %>% #as.numeric() %>% #prev expression ('[[:punct:]]', '', .)
   gsub('[[0]]', '', .)
 
 read_tin_dat <- function(lspath) {
-  met <- read.delim(lspath, sep= "") # any nr of white space as delims
+  met <- read.csv(lspath) # any nr of white space as delims: read.delim(lspath, sep="")
   return(met)
 }
 dat <- lapply(lsDat, function(lsDat){
@@ -106,14 +185,15 @@ dat <- lapply(lsDat, function(lsDat){
 })
 names(dat) <- lsDatna
 dat.df <- dat[-which(sapply(dat, is.null))]
-dat.df <- dat %>% bind_rows(., .id = "FNID") %>%
-  mutate(date = as.Date(paste(YYYY, MM, DD, sep="-"), format = "%Y-%m-%d")) %>%
-  select(-YYYY, -MM, -DD)
+dat.df <- dat %>% bind_rows(., .id = "FNID") #%>%
+  # mutate(date = as.Date(paste(YYYY, MM, DD, sep="-"), format = "%Y-%m-%d")) %>%
+  # select(-YYYY, -MM, -DD)
 # coors <- read.delim("data/raw/tinghai/ID_coordinates.txt", sep = "",
 #                     colClasses = "character") %>%
 #   mutate(E = as.numeric(Lon %>% gsub('.{1}$', '', .)), 
 #          N = as.numeric(Lat %>% gsub('.{1}$', '', .))) %>% 
 #   select(-Lon, -Lat)
+# saveRDS(dat.df, "input/sgi_met/14/met.rds")
 coors <- read.csv("data/raw/tinghai/ID_coordinates2.csv")
 dat.df <- left_join(dat.df, coors %>% mutate(FNID=as.character(FNID)))
 
@@ -122,20 +202,25 @@ dat.df <- dat.df %>% mutate(Tm = Tm-272.15, Tmax = Tmax-272.15, Tmin = Tmin-272.
 write_rds(dat.df, "R_finland_drought/output/process/swe_met.rds")
 
 
-# Loading SMHI data from Semjon
-# bom <- nc_open("data/raw/netcdf/RR24_Sweden_1961-2017.nc")
-# bom <- nc_open("data/raw/netcdf/T2m_daymean_Sweden_1961-2017.nc")
-# bom <- nc_open(lsT)
-# names(bom$var)
-# attributes(bom$dim)$names
-# lon <- ncvar_get(bom, "lon_bnds")
-# lat <- ncvar_get(bom, "lat_bnds")
-# coor <- list(paste(lon, lat, sep = "_")) 
-# date <- as.Date("1961-01-01 00:00:00") + ncvar_get(bom, "time_bnds") # hours since 1961-01-01 00:00:00
-# head(date)
-# val <- ncvar_get(bom, "tp")
-# dimnames(val) <- list(paste(lon, lat, sep="_"), as.character(date))
-# ncP2df <- function(lsPnc, en) 
+# Loading SMHI data from Anna Kuentz ----
+lsP <- list.files(path = "C:/Users/xnygmi/Desktop/data/SWE/data/SMHI/PTHBV/1961/01", 
+                  full.names = TRUE) # "input/PTHBV/"
+
+bom <- nc_open(lsP)
+names(bom$var)
+attributes(bom$dim)$names
+lon <- ncvar_get(bom, "lon")
+lat <- ncvar_get(bom, "lat")
+coor <- list(paste(lon, lat, sep = "_"))
+date <- as.POSIXct(ncvar_get(bom, "time"), origin="1970-01-01 00:00:00") # hours since 1970-01-01 00:00:00
+head(date)
+val <- ncvar_get(bom, "p")
+# val <- val[!sapply(val,is.na)] # look at all non-NaN values 
+dimnames(val) <- list(coor[[1]]) #, as.character(date)) # other format of date etc so code does not work
+
+p.df <- lapply(X=lsP, FUN=ncP2df, en="p") %>% 
+  bind_rows
+ncP2df <- function(lsPnc, en)
 {
   
   bom <- nc_open(lsPnc)    
@@ -143,7 +228,7 @@ write_rds(dat.df, "R_finland_drought/output/process/swe_met.rds")
   # Extract data
   lon <- ncvar_get(bom, "longitude")
   lat <- ncvar_get(bom, "latitude")
-  dates <- as.Date("1800-01-01") + ncvar_get(bom, "Time")
+  dates <- as.POSIXct(ncvar_get(bom, "time"), origin="1970-01-01 00:00:00") 
   data <- ncvar_get(bom, en)
   dimnames(data) <- list(paste(lon, lat, sep="_"), as.character(dates))
   

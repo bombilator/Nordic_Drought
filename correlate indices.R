@@ -71,53 +71,7 @@ saveRDS(smrei.sgi, "output/process/clusters_smrei_sgi1911.rds")
 
 # Step 2: correlate the values fun----
 
-spearcorr <- function(data, diffid1, diffid2, y1_start, y1_end, y2_start, y2_end, 
-                      y3_start, y3_end, dofilter){
-  if(dofilter==2){
-    print("doing 2")
-    new <- data %>% select(-data) %>% unnest() %>% 
-      filter(case_when(Cluster==diffid1 ~date >= y2_start & date <= y2_end,
-                       Cluster != diffid1 ~date >= y1_start & date <= y1_end)) %>%
-      select(-mean_mon, -year, -month) %>% group_by(id, N, E) %>% arrange(agg, date) %>% 
-      filter(!is.na(index)) %>% nest(.key="stand") %>% 
-      mutate(corr = purrr::map(stand, group_by, agg) %>% 
-               purrr::map(summarize, corr = cor(sgi, index, use = "everything", method="spearman")))
-  } else if(dofilter==3) {
-    print("doing 3")
-    new <- data %>% select(-data) %>% unnest() %>% 
-      filter(case_when(Cluster==diffid1 ~date >= y2_start & date <= y2_end,
-                       Cluster==diffid2 ~date >= y3_start & date <= y3_end,
-                       Cluster != diffid1 & Cluster != diffid2 ~date >= y1_start & date <= y1_end)) %>%
-      select(-mean_mon, -year, -month) %>% group_by(id, N, E) %>% arrange(agg, date) %>% 
-      filter(!is.na(index)) %>% nest(.key="stand") %>% 
-      mutate(corr = purrr::map(stand, group_by, agg) %>% 
-               purrr::map(summarize, corr = cor(sgi, index, use = "everything", method="spearman")))
-  } else{
-    print("doing same for all")
-    new <- data %>% select(-data) %>% unnest() %>% 
-      select(-mean_mon, -year, -month) %>% group_by(id, N, E) %>% arrange(agg, date) %>% 
-      filter(!is.na(index)) %>% nest(.key="stand") %>% 
-      mutate(corr = purrr::map(stand, group_by, agg) %>% 
-               purrr::map(summarize, corr = cor(sgi, index, use = "everything", method="spearman")))
-  }
-  new <- new %>% select(-stand) %>% unnest() %>% arrange(id) %>% ungroup()
-  return(new)
-  # df %>% select(-data) %>% unnest() %>% 
-  # filter(case_when(Cluster==34 ~ year >= 2003 & year <= 2006,    # filter for different times as the 
-  #                 Cluster!=34 ~ year>= 2002 & year <= 2004)) %>% # different clusters have droughts for different 
-  #                                                                # periods
-  # select(-mean_mon, -year, -month) %>% group_by(id, N, E) %>% arrange(agg, date) %>% 
-  # filter(!is.na(index)) %>% # if I use the same period for standardisation for met as for groundwater, 
-  # # NAs will be produced in the first years of the met index value calculations for all aggregation periods
-  # nest(.key = "stand") %>%
-  # mutate(
-  #   cor_sgi_spi = 
-  #     # purrr::map(stand, gather, spi_agg, spi, -date, -sgi) %>% 
-  #     purrr::map(stand, group_by, agg) %>% 
-  #     purrr::map(summarize, cor_sgi_spi = cor(sgi, index, use = "everything",
-  #                                             method="spearman"))
-  # )
-}
+source("rfuncs/cor_indices.R")
 
 # correlate values for longer periods ----
 # why only Kendall correlations work-ish: https://stackoverflow.com/questions/27047598/r-cor-method-pearson-returns-na-but-method-spearman-returns-value-why
@@ -131,9 +85,14 @@ p4=as.Date("1998-08-15")
 # p4=as.Date("2007-01-15")
 p5=as.Date("2002-05-15")
 p6=as.Date("2004-06-15")
-yano = 2
+yano = 0
 spi_sgi_corr = readRDS("output/process/clusters_spi_sgi1911.rds") %>% 
   spearcorr(data=., dofilter=yano,
+            diffid1=34, y1_start = p1, y1_end = p2, y2_start = p3, y2_end = p4,
+            diffid2 = 37, y3_start = p5, y3_end = p6)
+spi_sgi_corr = readRDS("output/process/clusters_spi_sgi1911.rds") %>% 
+  select(-data) %>% unnest() %>%
+  spearcorr.pval(data=., dofilter=yano,
             diffid1=34, y1_start = p1, y1_end = p2, y2_start = p3, y2_end = p4,
             diffid2 = 37, y3_start = p5, y3_end = p6)
 # saveRDS(spi_sgi_corr, "output/process/clusters_spi_sgi_corr_94.rds")
@@ -160,12 +119,25 @@ a <- spi_sgi_corr %>% mutate(bold = ifelse(corr<0.4 & corr > -0.4, NA, "+/- 0.4"
   # mutate(id = paste(id, Station, sep = "_")) %>%
   group_by(id) %>% mutate(agg=as.numeric(agg)) %>%
   arrange(agg) %>% ggplot(.) + aes(agg, id, group=id, fill = corr) + geom_tile() +
-  # geom_point(aes(agg, id, colour=bold), shape=21)+
+  geom_point(aes(agg, id, colour=bold), shape=21, size=4)+
+  geom_point(aes(colour=tresh), size=2)+
+  geom_tile(data=. %>% filter(corr==max(corr)), colour="black", fill=NA) +
   # scale_fill_gradient2("", low="blue", mid = "yellow", high="red", midpoint = 0, limits=c(-1,1)) + 
   scale_fill_viridis_c(limits=c(-1,1), option="plasma") +
-  scale_colour_manual(na.value = NA, values=c("+/- 0.4"="black"))+
+  scale_colour_manual(na.value = NA, values=c("+/- 0.4"="white",
+                                              "<0.05"="black", ">0.05"=NA))+
   ggtitle("SPI") #+ xlab("")
 a
+spi_sgi_corr %>% mutate(bold = ifelse(corr<0.4 & corr > -0.4, NA, "+/- 0.4")) %>%
+  arrange(id) %>%  ungroup() %>% group_by(id) %>% mutate(agg=as.numeric(agg)) %>%
+  arrange(agg) %>% add_tally(tresh=="<0.05") %>%
+  filter(tresh == "<0.05" & corr==max(corr)) %>% 
+  mutate(agg = as.numeric(agg), Stn = gsub("_.*", "", x=id)) %>% 
+  ggplot(.) + 
+  geom_point(aes(agg, n, colour=id, shape = Stn), size=3) +
+  theme(panel.background = element_rect(fill="white", colour = "black"),
+        panel.grid = element_line(colour="lightgrey", linetype=2)) +ylim(0,50)
+
 b <- smri_sgi_corr %>% arrange(id) %>%  ungroup() %>%
   mutate(bold = ifelse(corr<0.4 & corr > -0.4, NA, "+/- 0.4")) %>%
   # mutate(id = paste(id, Station, sep = "_")) %>%

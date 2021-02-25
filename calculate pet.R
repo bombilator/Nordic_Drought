@@ -8,7 +8,7 @@ library(SPEI)
 library(rgdal)
 library(stringr)
 ### below: for paper 1 (all wells)
-# corS <- readRDS("output/process/fennos_tibm_all.rds") %>%
+# corS <- readRDS("output/process/fennos_tibm_all2.rds") %>%
 #   filter(str_detect(id, "s_"))
 # coordinates(corS) = ~E+N
 # proj4string(corS) = CRS("+init=epsg:3006")
@@ -19,8 +19,8 @@ library(stringr)
 # proj4string(corF) = CRS("+init=epsg:3067") 
 # corF = spTransform(corF, CRS("+proj=longlat +datum=WGS84"))
 # cor = full_join(as.data.frame(corF), as.data.frame(corS))
-cor <- readRDS("input/sgi_met/met.rds") %>% #sgi paper, 3 met grids
-  rename(id = Cluster) %>% mutate(year= year(date), month = month(date)) 
+cor <- readRDS("input/sgi_met/14/met.rds") %>% #sgi paper, 3 met grids
+  mutate(year= year(date), month = month(date)) 
 
 # pet <- cor %>% #can't load tidyquant
 #   ungroup() %>% 
@@ -32,7 +32,7 @@ cor <- readRDS("input/sgi_met/met.rds") %>% #sgi paper, 3 met grids
 #                FUN = mean, 
 #                na.rm = TRUE,
 #                col_rename= "mean_T"))
-pet <- cor %>% filter(year >= 1965) %>% 
+pet <- cor %>% #filter(year >= 1965) %>% 
   group_by(id, E, N, year, month) %>% summarise(mean_T = mean(temp), sum_P=sum(precip)) %>% 
   group_by(id, E, N, year) %>% nest() %>% rename(monthly_T = data)
 
@@ -55,7 +55,7 @@ for(i in pet$N){
     )
 }
 
-saveRDS(pet.df, "output/process/3clusters_pet.R") #paper1: fennos_pet_all.R ||| tibm_pet ||| fennos_pet
+saveRDS(pet.df, "output/process/clusters_pet191128.R") #paper1: fennos_pet_all.R ||| tibm_pet ||| fennos_pet
 
 # change dates into same style as gw data for paper 1: ----
 pet <- readRDS("output/process/fennos_pet_all.r")

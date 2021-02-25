@@ -15,12 +15,13 @@ library(lubridate)
 #   group_by(id)  %>% filter(date >= as.Date("1974-01-01")) # the time series differ in length,
 #  ^ get them in the same time frame
 
-tibm<- readRDS("output/process/3clusters_tibm.RDS") %>% rename(Cluster=id) %>% select(Cluster, date, Q, M)
-met <- readRDS("input/sgi_met/met.RDS") %>% dplyr::filter(as.Date(date) >= as.Date("1965-01-01")) %>% 
-  full_join(., tibm)
-met <- met %>%mutate(year=year(date), month=month(date)) %>%  group_by(Cluster, N,E,year, month) %>% 
+tibm <- readRDS("output/process/clusters_tibm1911.RDS") %>% select(id, date, Q, M)
+met <- readRDS("input/sgi_met/14/met.rds") %>% 
+  full_join(., tibm) %>% 
+  dplyr::filter(as.Date(date) >= as.Date("1970-01-01"))
+met <- met %>%mutate(year=year(date), month=month(date)) %>% group_by(id, N,E,year, month) %>% 
   summarise(sum_P=sum(precip), sum_Q=sum(Q))
-met <- met %>% rename(id=Cluster)
+met <- met #%>% rename(id=Cluster)
 
 # Ezra's algorithm for SPI/SMRI ----
 PQ_index_mutate <- function (sumq, agg) {
@@ -58,7 +59,7 @@ p.time <- met %>% mutate(date = as.Date(paste(year, month, "15", sep="-"), forma
 spi.ind <- spi.ind %>% dplyr::select(-data) %>% unnest() %>% group_by(id, agg) %>% 
   mutate(month_past = 1:length(index)) %>% left_join(., p.time, by=c("id", "month_past", "N", "E"))
 
-saveRDS(spi.ind, "output/process/3clusters_spi.rds")
+saveRDS(spi.ind, "output/process/clusters_spi191128.rds")
 
 
 # calculate tibm ----
@@ -81,7 +82,7 @@ tibm.ind <- met %>% na.omit(met) %>%
   )
 tibm.ind <- tibm.ind %>% select(-data) %>% unnest() %>% group_by(id, agg) %>% 
   mutate(month_past = 1:length(index)) %>% left_join(., p.time, by=c("id", "month_past", "N", "E"))
-saveRDS(tibm.ind, "output/process/3clusters_smri.rds")
+saveRDS(tibm.ind, "output/process/clusters_smri191129.rds")
 
 
 # SPEI = SPI and SMRI - PET ----
@@ -90,13 +91,16 @@ saveRDS(tibm.ind, "output/process/3clusters_smri.rds")
 #                       according to the instructions for the spei function
 # filter(date >= as.Date("1974-01-01"))
 
-tibm <- readRDS("output/process/3clusters_tibm.rds") %>% rename(Cluster=id) %>%
+tibm <- readRDS("output/process/clusters_tibm1911.rds") %>% #rename(Cluster=id) %>%
   mutate(year=year(date), month=month(date)) %>%
-  select(Cluster, Q, year, month) %>% group_by(Cluster, year, month) %>%
+  select(id, Q, year, month) %>% group_by(id, year, month) %>%
   summarise(sum_Q = sum(Q))
-pet <- readRDS("output/process/3clusters_pet.R") %>% 
-  unnest() %>% select(-N1) %>% rename(Cluster=id) %>% 
-  mutate(p_pet = sum_P - pet) %>% full_join(., tibm) %>% mutate(q_pet = sum_Q - pet)
+pet <- readRDS("output/process/clusters_pet191128.R") %>% 
+  unnest() %>% 
+  select(-N1) %>% #rename(Cluster=id) %>% 
+  full_join(., tibm) %>%
+  filter(year >= 1970) %>%  
+  mutate(p_pet = sum_P - pet, q_pet = sum_Q - pet)
 
 # SPEI algorithm----
 PQspei_index_mutate <- function (q_pet, agg) {
@@ -112,7 +116,8 @@ PQspei_index_mutate <- function (q_pet, agg) {
 
 # implement SPEI algorithm ----
 # SMREI ----
-spei_tibm.df_ind <- pet %>% rename(id = Cluster) %>% filter(!is.na(pet)) %>% 
+spei_tibm.df_ind <- pet %>% #rename(id = Cluster) %>% 
+    filter(!is.na(pet)) %>% 
   ungroup() %>% group_by(id) %>%
   nest %>%
   mutate(
@@ -127,10 +132,11 @@ spei_tibm.df_ind <- left_join(spei_tibm.df_ind, p.time %>%
                                          spei_tibm.df_ind$id), 
                               by=c("id", "month_past")) %>%
   select(-month_past) 
-saveRDS(spei_tibm.df_ind, "output/process/3cluster_smrei.rds")
+saveRDS(spei_tibm.df_ind, "output/process/cluster_smrei191129.rds")
 
 # SPEI ----
-spei.df_ind <- pet %>% rename(id = Cluster) %>% filter(!is.na(pet)) %>% 
+spei.df_ind <- pet %>% #rename(id = Cluster) %>% 
+  filter(!is.na(pet)) %>% 
   ungroup() %>% group_by(id) %>%
   nest %>%
   mutate(
@@ -143,7 +149,7 @@ spei.df_ind <- left_join(spei.df_ind, p.time %>%
                                     spei.df_ind$id), 
                          by=c("id", "month_past")) %>%
   select(-month_past) 
-saveRDS(spei.df_ind, "output/process/3clusters_spei.rds")
+saveRDS(spei.df_ind, "output/process/clusters_spei191128.rds")
 
 #
 # 2, Weibull plotting distribution? ----

@@ -24,7 +24,7 @@ smri_sgi_corr <- readRDS("R_finland_drought/output/process/fin_smri_sgi10_corr.r
   max_corr = purrr::map(cor_sgi_smri, summarise, 
                         smri_max_corr=max(cor_sgi_smri, na.rm = TRUE))) %>% 
   unnest(.key=max_corr) %>% select(-max_corr)
-spi_sgi_corr <- readRDS("R_finland_drought/output/process/fin_spi_sgi_corr.rds") %>% 
+spi_sgi_corr <- readRDS("output/process/fin_spi_sgi_corr.rds") %>% 
   mutate(
   max_corr = purrr::map(cor_sgi_spi, summarise, 
                         spi_max_corr=max(cor_sgi_spi, na.rm = TRUE))) %>% 
