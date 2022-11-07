@@ -6,7 +6,7 @@ PQ_index_mutate <- function (sumq, agg) {
     data.frame(index = as.numeric(SPEI::spi(sumq, x, distribution = "Gamma")$fitted, 3))} # the spi function requires a vector input
   )
   
-  return(bind_rows(pq, .id = "agg") %>% as.tibble)
+  return(bind_rows(pq, .id = "agg") %>% as_tibble)
 }
 
 # SPEI algorithm----
@@ -18,5 +18,5 @@ PQspei_index_mutate <- function (q_pet, agg) {
                                              distribution = "log-Logistic")$fitted, 3))}
   )
   
-  return(bind_rows(pq, .id = "agg") %>% as.tibble)
+  return(bind_rows(pq, .id = "agg") %>% as_tibble)
 }

@@ -10,6 +10,10 @@ library(dplyr)
 # 1. group data biweekly, interpolate the water tables for missing weeks if necessary
 # 2. define the recharge period and it's timing (in plots.R)
 
+#download new data if necessary
+source("rfuncs/importSGUjson.R")
+processedData = importSGUjson()
+
 # FI reading the data  ----
 chars <- readRDS("output/process/gwts_chars.rds") %>% 
   # select(Tunnus, elevation) %>%

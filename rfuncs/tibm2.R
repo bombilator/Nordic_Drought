@@ -1,6 +1,7 @@
 # I'm not using the mf, rf in this version
 
-tibm2 = function(df, id = df$id, temp = df$Tday, 
+tibm2 = function(df, id = df$id, 
+                 temp = df$Tday, 
                 P = df$RRday, 
                 date = df$date){
   pb <- txtProgressBar(min = 0, max = length(date), style = 3)
@@ -11,6 +12,8 @@ tibm2 = function(df, id = df$id, temp = df$Tday,
   Cwh = 0.1 # Water holding capacity (default)
   rf = 0.0006 # radiation factor for snow
   mf = 1.8 # melt factor
+  
+
   
 
   tibm <- data.frame(id = matrix(id, nrow = length(date)))

@@ -80,7 +80,7 @@ grad.df <- as.data.frame(rasterToPoints(raster(lsGRad)))
 
 
 
-# download CRU data ----------------------------------------------------------
+# download CRU data Fennos ----------------------------------------------------------
 #http://data.ceda.ac.uk/badc/cru/data/cru_ts/cru_ts_4.04/data/frs
 # frost, PET, P and meanT
 
@@ -114,6 +114,7 @@ ncfun <- function(lsnc, en){
     as_tibble() %>% 
     mutate(date = as.Date(date)) %>%
     mutate_at(vars(lon:lat), as.numeric) 
+  
   
   return(data.df)
 }
@@ -158,7 +159,37 @@ ok <- urc.df %>% unnest() %>% group_by(lon, lat) %>% mutate(year=year(date)) %>%
 ggmap(stamen) + geom_tile(data=ok, aes(lon,lat, fill=med_pet), alpha = .7) + 
   scale_fill_viridis_c(na.value="grey50")
 
+# load URC data for BC ----
+lsbc <- list.files(path="Q:/Projects/Drought Scandinavia/Michelle/Nordic_Drought/input/URC_BC",
+                    full.names = TRUE, pattern="*.nc")
+ncfun <- function(lsnc, en){
+  bom <- nc_open(lsnc)    
+  # print(bom) # Inspect the data
+  # Extract data
+  lon <- ncvar_get(bom, "lon")
+  lat <- ncvar_get(bom, "lat")
+  dates <- as.Date("1900-01-01") + ncvar_get(bom, "time")
+  data <- ncvar_get(bom, varid=en)
+  dimnames(data) <- list(paste(lon, lat, sep="_"))
+  nc_close(bom)
+  
+  data.df <- data %>% 
+    as.data.frame %>%
+    rownames_to_column(var = "lonlat") %>% 
+    as.tibble %>% 
+    gather(date, value, - lonlat) %>% 
+    mutate(date = as.Date(dates)) %>%
+    separate(lonlat, into = c("lon", "lat"), sep = "_") %>% 
+    mutate_at(vars(lon:lat), as.numeric) 
+  
+  return(data.df)
+}
 
+bc.df <- lapply(X = lsbc, FUN = ncfun, en="pre") %>% 
+  bind_rows %>% 
+  group_by(lon, lat) %>% 
+  nest(.key = "monthly") 
+saveRDS(bc.df, "output/process/URC_BC_P.rds")
 
 # plot for random day ---------------------------------------------------------
     

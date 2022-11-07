@@ -3,35 +3,41 @@ spearcorr <- function(data, diffid1, diffid2, y1_start, y1_end, y2_start, y2_end
                       y3_start, y3_end, dofilter){
   if(dofilter==1){
     print("doing 1 period/same for all")
-    new <- data %>% select(-data) %>% unnest() %>% 
+    new <- data %>% 
       filter(date >= y1_start & date <= y1_end) %>%
-      select(-mean_mon, -year, -month) %>% group_by(id, N, E) %>% arrange(agg, date) %>% 
-      filter(!is.na(index)) %>% nest(.key="stand") %>% 
+      group_by(id, lon, lat) %>% arrange(agg, date) %>% 
+      filter(!is.na(index))  %>%
+      filter(n()>3) %>% 
+      nest(.key="stand") %>% 
       mutate(corr = purrr::map(stand, group_by, agg) %>% 
                purrr::map(summarize, corr = cor(sgi, index, use = "everything", method="spearman")))
   } else if(dofilter==2){
     print("doing 2")
-    new <- data %>% select(-data) %>% unnest() %>% 
+    new <- data %>% 
       filter(case_when(Cluster==diffid1 ~date >= y2_start & date <= y2_end,
                        Cluster != diffid1 ~date >= y1_start & date <= y1_end)) %>%
-      select(-mean_mon, -year, -month) %>% group_by(id, N, E) %>% arrange(agg, date) %>% 
-      filter(!is.na(index)) %>% nest(.key="stand") %>% 
+      group_by(id, lon, lat) %>% arrange(agg, date) %>% 
+      filter(!is.na(index))  %>%
+      filter(n()>3) %>% 
+      nest(.key="stand") %>% 
       mutate(corr = purrr::map(stand, group_by, agg) %>% 
                purrr::map(summarize, corr = cor(sgi, index, use = "everything", method="spearman")))
   } else if(dofilter==3) {
     print("doing 3")
-    new <- data %>% select(-data) %>% unnest() %>% 
+    new <- data %>% 
       filter(case_when(Cluster==diffid1 ~date >= y2_start & date <= y2_end,
                        Cluster==diffid2 ~date >= y3_start & date <= y3_end,
                        Cluster != diffid1 & Cluster != diffid2 ~date >= y1_start & date <= y1_end)) %>%
-      select(-mean_mon, -year, -month) %>% group_by(id, N, E) %>% arrange(agg, date) %>% 
-      filter(!is.na(index)) %>% nest(.key="stand") %>% 
+      group_by(id, lon, lat) %>% arrange(agg, date) %>% 
+      filter(!is.na(index))  %>%
+      filter(n()>3) %>% 
+      nest(.key="stand") %>% 
       mutate(corr = purrr::map(stand, group_by, agg) %>% 
                purrr::map(summarize, corr = cor(sgi, index, use = "everything", method="spearman")))
   } else{
     print("doing entire record, no filter")
-    new <- data %>% select(-data) %>% unnest() %>% 
-      select(-mean_mon, -year, -month) %>% group_by(id, N, E) %>% arrange(agg, date) %>% 
+    new <- data %>% 
+      group_by(id, lon, lat) %>% arrange(agg, date) %>% 
       filter(!is.na(index)) %>% nest(.key="stand") %>% 
       mutate(corr = purrr::map(stand, group_by, agg) %>% 
                purrr::map(summarize, corr = cor(sgi, index, use = "everything", method="spearman")))
@@ -67,7 +73,7 @@ spearcorr.pval <- function(data, diffid1, diffid2, y1_start, y1_end, y2_start = 
     print("doing 1 period, filtered/same for all")
     new <- data %>% 
       filter(date >= y1_start & date <= y1_end) %>% group_by(id, agg) %>% arrange(agg, date) %>% 
-      filter(!is.na(index)) %>% 
+      filter(!is.na(index)) %>% filter(n()>=3) %>% 
       do(cortest = tidy(cor.test(~sgi+index, use = "everything", method="spearman", data=.))) %>% 
       mutate(pval = cortest$p.value, corr = cortest$estimate, 
              tresh= ifelse(pval < 0.05, "<0.05", ">0.05"))
@@ -77,7 +83,7 @@ spearcorr.pval <- function(data, diffid1, diffid2, y1_start, y1_end, y2_start = 
       filter(case_when(Cluster==diffid1 ~date >= y2_start & date <= y2_end,
                        Cluster != diffid1 ~date >= y1_start & date <= y1_end)) %>%
       group_by(id, agg) %>% arrange(agg, date) %>% 
-      filter(!is.na(index)) %>% 
+      filter(!is.na(index)) %>% filter(n()>=3) %>% 
       do(cortest = tidy(cor.test(~sgi+index, use = "everything", method="spearman", data=.))) %>% 
       mutate(pval = cortest$p.value, corr = cortest$estimate, tresh= ifelse(pval < 0.05, "<0.05", ">0.05"))
   } else if(dofilter==3) {
@@ -87,13 +93,13 @@ spearcorr.pval <- function(data, diffid1, diffid2, y1_start, y1_end, y2_start = 
                        Cluster==diffid2 ~date >= y3_start & date <= y3_end,
                        Cluster != diffid1 & Cluster != diffid2 ~date >= y1_start & date <= y1_end)) %>%
       group_by(id, agg) %>% arrange(agg, date) %>% 
-      filter(!is.na(index)) %>% 
+      filter(!is.na(index)) %>% filter(n()>=3) %>% 
       do(cortest = tidy(cor.test(~sgi+index, use = "everything", method="spearman", data=.))) %>% 
       mutate(pval = cortest$p.value, corr = cortest$estimate, tresh= ifelse(pval < 0.05, "<0.05", ">0.05"))
   } else{
     print("doing entire record, no filter")
     new <- data %>% group_by(id, agg) %>% arrange(agg, date) %>% 
-      filter(!is.na(index)) %>% 
+      filter(!is.na(index)) %>% filter(n()>=3) %>% 
       do(cortest = tidy(cor.test(~sgi+index, use = "everything", method="spearman", data=.))) %>% 
       mutate(pval = cortest$p.value, corr = cortest$estimate, tresh= ifelse(pval < 0.05, "<0.05", ">0.05"))
   }

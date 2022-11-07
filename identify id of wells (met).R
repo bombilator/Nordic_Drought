@@ -12,7 +12,6 @@ t.df <- readRDS("R_finland_drought/output/process/Tdf.rds")
 hum.df <- readRDS("R_finland_drought/output/process/Humdf.rds")
 
 
-# / Michelle
 # read groundwater data transformed to sgi
 g.df <- read_rds("R_finland_drought/output/process/fin_gw_sgi.rds") %>%
     ungroup() %>%
@@ -84,7 +83,6 @@ ggmap(stamen) +
 # 
 # 
 
-# / Michelle
 p2.df <- p2.df %>%  unnest() %>% rename(RRday = value, N = lat, E = lon)
 t2.df <- t2.df %>%  unnest() %>%  rename(N = lat, E = lon)
 hum2.df <- hum2.df %>% unnest() %>% rename(N = lat, E = lon)

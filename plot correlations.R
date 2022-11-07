@@ -19,7 +19,7 @@ library(ggplot2)
 met.coor <- p.df %>% distinct(E,N,id) # for mapping the results spatially ----
 # 
 # get max corr ----
-smri_sgi_corr <- readRDS("R_finland_drought/output/process/fin_smri_sgi10_corr.rds") %>% 
+smri_sgi_corr <- readRDS("output/process/fin_smri_sgi10_corr.rds") %>% 
   mutate(
   max_corr = purrr::map(cor_sgi_smri, summarise, 
                         smri_max_corr=max(cor_sgi_smri, na.rm = TRUE))) %>% 
@@ -109,7 +109,7 @@ spi_smri_bind %>%
 #   data = smri_max_corr, fill = "black", colour = "black"
 # )
 
-g.df <- readRDS("R_finland_drought/output/process/fin_gw_sgi.rds") %>% 
+g.df <- readRDS("output/process/fin_gw_sgi.rds") %>% 
   select(Stationname, Tunnus, id, gw_monthly) %>% unnest() %>% rename(date = Date)
 # smri_sgi_corr %>%
 g.df %>%
